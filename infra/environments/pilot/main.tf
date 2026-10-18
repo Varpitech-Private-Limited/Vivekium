@@ -549,6 +549,18 @@ module "network" {
   # buying yet, at roughly $32 a month each.
   single_nat_gateway = true
 
+  # The pilot already has a managed NAT gateway for the model provider, SES
+  # and other public APIs.  Paying for four interface endpoint ENIs as well is
+  # duplicate egress infrastructure while Judge0 is disabled.  Keep the
+  # endpoints only for the isolated Judge0 host, which deliberately has no
+  # internet route and therefore cannot fall back to NAT.
+  interface_endpoints = var.judge0_enabled ? [
+    "ecr.api",
+    "ecr.dkr",
+    "secretsmanager",
+    "logs",
+  ] : []
+
   # The code sandbox host reaches ECR, Secrets Manager and Logs through the
   # existing interface endpoints. Empty while `judge0_enabled` is false, which
   # leaves the endpoints group exactly as it is.
@@ -1555,9 +1567,12 @@ module "ecs" {
     }
 
     frontend = {
-      image            = "${module.ecr.repository_urls["frontend"]}:${local.frontend_image_tag}"
-      cpu              = 512
-      memory           = 1024
+      image = "${module.ecr.repository_urls["frontend"]}:${local.frontend_image_tag}"
+      # Temporary solo-test size. The 14-day pilot peak was 35.46% CPU and
+      # 9.18% memory at 512/1024; 256/512 is a valid Linux Fargate pair and
+      # still leaves ample headroom for one developer's manual E2E testing.
+      cpu              = 256
+      memory           = 512
       desired_count    = local.service_count
       max_count        = 4
       port             = 3000
@@ -2077,6 +2092,84 @@ module "scheduler" {
   }
 
   tags = local.tags
+}
+
+# ── Owner-only pilot sleep guard ─────────────────────────────────────────────
+#
+# RDS automatically starts a stopped instance after seven days.  A sleeping
+# owner-only pilot must not then accrue database compute indefinitely because
+# the operator's laptop was off.  This universal Scheduler target is the one
+# deliberate exception to the disabled application schedules: sleep mode
+# enables it, wake mode disables it before starting RDS.  Calling StopDBInstance
+# while RDS is already stopped is harmless and retries are disabled.
+
+data "aws_iam_policy_document" "pilot_sleep_guard_assume" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["scheduler.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "pilot_sleep_guard" {
+  name               = "${var.project}-${local.environment}-rds-sleep-guard"
+  assume_role_policy = data.aws_iam_policy_document.pilot_sleep_guard_assume.json
+  tags               = local.tags
+}
+
+data "aws_iam_policy_document" "pilot_sleep_guard" {
+  statement {
+    effect    = "Allow"
+    actions   = ["rds:StopDBInstance"]
+    resources = ["arn:aws:rds:${var.region}:${var.account_id}:db:${var.project}-${local.environment}"]
+  }
+}
+
+resource "aws_iam_role_policy" "pilot_sleep_guard" {
+  name   = "stop-pilot-rds"
+  role   = aws_iam_role.pilot_sleep_guard.id
+  policy = data.aws_iam_policy_document.pilot_sleep_guard.json
+}
+
+resource "aws_scheduler_schedule" "pilot_sleep_guard" {
+  name       = "${var.project}-${local.environment}-rds-sleep-guard"
+  group_name = "default"
+
+  schedule_expression = "rate(1 hour)"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = "arn:aws:scheduler:::aws-sdk:rds:stopDBInstance"
+    role_arn = aws_iam_role.pilot_sleep_guard.arn
+    input = jsonencode({
+      DbInstanceIdentifier = "${var.project}-${local.environment}"
+    })
+
+    retry_policy {
+      maximum_retry_attempts = 0
+    }
+  }
+
+  # Operational state belongs to scripts/pilot_power.py.  Terraform owns the
+  # target, permission and cadence without waking or disabling the guard during
+  # an ordinary deploy.
+  state = "DISABLED"
+  lifecycle {
+    ignore_changes = [state]
+  }
+
+  depends_on = [aws_iam_role_policy.pilot_sleep_guard]
 }
 
 # ── Observability ────────────────────────────────────────────────────────────

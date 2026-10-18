@@ -618,6 +618,16 @@ resource "aws_appautoscaling_target" "this" {
   scalable_dimension = "ecs:service:DesiredCount"
   min_capacity       = each.value.desired_count
   max_capacity       = each.value.max_count
+
+  lifecycle {
+    # Desired count is already an operational setting (the ECS service below
+    # ignores it).  The pilot power controller uses AWS's supported temporary
+    # suspension flag while services are intentionally at zero.  Terraform
+    # must not resume scaling during a deploy and thereby wake a sleeping
+    # environment.  The configured min/max remain Terraform-owned and are not
+    # ignored; launch-mode restores the suspension flags to false.
+    ignore_changes = [suspended_state]
+  }
 }
 
 resource "aws_appautoscaling_policy" "cpu" {

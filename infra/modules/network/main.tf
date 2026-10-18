@@ -423,17 +423,10 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.ecs.id]
   }
 
-  # NO EGRESS RULE AT ALL. A database does not initiate connections. The
-  # default AWS security group allows all egress, so this is stated by having
-  # exactly one empty egress block rather than by omission -- omitting it
-  # entirely would inherit the permissive default.
-  egress {
-    description = "None. A database does not call out."
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = []
-  }
+  # NO EGRESS RULE AT ALL. A database does not initiate connections.  State it
+  # as an explicit empty rule set: an inline block with an empty CIDR is
+  # normalised away by EC2 and otherwise produces permanent Terraform drift.
+  egress = []
 
   tags = merge(var.tags, { Name = "${local.name}-rds" })
 }
@@ -451,13 +444,8 @@ resource "aws_security_group" "redis" {
     security_groups = [aws_security_group.ecs.id]
   }
 
-  egress {
-    description = "None."
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = []
-  }
+  # Explicitly empty for the same reason as RDS above.
+  egress = []
 
   tags = merge(var.tags, { Name = "${local.name}-redis" })
 }

@@ -116,4 +116,12 @@ resource "aws_scheduler_schedule" "this" {
   }
 
   state = var.enabled ? "ENABLED" : "DISABLED"
+
+  lifecycle {
+    # Solo-test sleep mode disables application sweeps while PostgreSQL is
+    # stopped and re-enables them only after wake has passed health checks.
+    # Terraform continues to own every schedule definition, but an ordinary
+    # deploy must not turn background work back on against a sleeping database.
+    ignore_changes = [state]
+  }
 }
