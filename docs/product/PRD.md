@@ -135,7 +135,7 @@ Personal and social leads share one lead model with six milestones (three intera
 
 ## 14. Authentication and the public site
 
-Google or email and password through Firebase; the backend exchanges the verified identity for secure session cookies that die with the browser, with a 30-minute idle deadline moved only by real activity. No auth surface draws or checks a server CAPTCHA (A-24, 2026-10-30). `captcha_purpose` on the session exchange is only the portal filter. `captcha_proof` may still be sent by an old client and is not read. The removal is not deployed yet. Company registration and password reset or change use a security code, not a login OTP. Google never signs in a company role; staff are invite-only. Sign-in asks for no workspace; the backend routes by the account's own record.
+Google or email and password through Firebase; the backend exchanges the verified identity for secure session cookies that die with the browser, with a 30-minute idle deadline moved only by real activity. No auth surface draws or checks a server CAPTCHA (A-24, 2026-10-30). `captcha_purpose` on the session exchange is only the portal filter. `captcha_proof` may still be sent by an old client and is not read. The removal is deployed on `readypick-pilot-api:56` and `readypick-pilot-frontend:46`. Company registration and password reset or change use a security code, not a login OTP. Google never signs in a company role; staff are invite-only. Sign-in asks for no workspace; the backend routes by the account's own record.
 
 ## 15. Quality requirements
 

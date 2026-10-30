@@ -78,6 +78,6 @@ Pilot (`readypick-pilot`, `ap-south-2`) is the live site; `staging` and `product
 
 - **Secrets** live in AWS Secrets Manager and are injected at runtime, never baked into an image and never committed.
 - **Tenant isolation** is a Postgres row-level-security policy on every tenant-scoped table.
-- **Credentials** are Firebase's; the application stores no password. Company registration, password reset and change use a server-side security code. No CAPTCHA challenge is drawn and no proof is checked (A-24). The removal is not deployed yet.
+- **Credentials** are Firebase's; the application stores no password. Company registration, password reset and change use a server-side security code. No CAPTCHA challenge is drawn and no proof is checked (A-24). The removal is deployed on `readypick-pilot-api:56` and `readypick-pilot-frontend:46`.
 - **Candidate uploads are untrusted input.** Resumes and projects are validated and never executed; archives are inspected before extraction.
 - **No number reaches a client.** Scores exist internally and become words server-side.
