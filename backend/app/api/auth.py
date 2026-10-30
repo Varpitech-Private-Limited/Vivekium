@@ -48,6 +48,8 @@ from app.schemas.auth import (
     CaptchaVerifyIn,
     CaptchaVerifyOut,
     ContextOut,
+    DemoSessionIn,
+    DemoStatusOut,
     FirebaseSessionIn,
     MeOut,
     PasswordChangeCompleteIn,
@@ -66,6 +68,7 @@ from app.schemas.auth import (
 )
 from app.services import auth_sessions, candidate_identity, login_context
 from app.services import company_onboarding
+from app.services import demo_access
 from app.services import captcha, password_policy, security_codes, security_email
 from app.services import firebase_auth
 from app.services import rbac
@@ -209,6 +212,18 @@ async def _finalize_single(
             ),
         )
 
+    if user.public_demo:
+        await record_auth_event(
+            session, action=AUTH_LOGIN_REFUSED, actor_user_id=user.id,
+            tenant_id=user.tenant_id,
+            metadata={"reason": "public_demo_firebase_refused",
+                      "provider": identity.provider},
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="This sign-in cannot be linked to a demo workspace.",
+        )
+
     user.firebase_uid = identity.uid
     user.auth_providers = sorted(set((user.auth_providers or []) + [identity.provider]))
     if identity.email_verified:
@@ -335,6 +350,15 @@ async def firebase_session(
     matched = (await session.execute(
         select(User).where(or_(*match_filters)).order_by(User.created_at, User.id)
     )).scalars().all()
+    # A public demo row shares an email with a real account only because
+    # Postgres treats NULL tenant ids as distinct. Never bind Firebase onto
+    # it, and never create a second candidate on top of that email.
+    if matched and all(user.public_demo for user in matched):
+        raise HTTPException(
+            status_code=403,
+            detail=f"No {_PORTAL_LABEL[portal]} workspace is linked to this account",
+        )
+    matched = [user for user in matched if not user.public_demo]
 
     if matched:
         eligible = login_context.eligible_login_users(
@@ -406,6 +430,145 @@ async def firebase_session(
         contexts=[_context_out(c) for c in contexts],
         context_token=token,
     )
+
+
+_DEMO_EMAIL_REFUSED = "This email address cannot be used for the demo. Use a different email."
+_DEMO_OWNER_REFUSED = "This email address cannot be used for the demo."
+_DEMO_COMPANY_MISSING = (
+    "No company workspace exists for this email. Register a demo company first."
+)
+
+
+@router.get("/demo-status", response_model=DemoStatusOut)
+async def demo_status() -> DemoStatusOut:
+    """Whether public demo sign-in is on. Sets no cookie and opens no session."""
+    return DemoStatusOut(demo_mode=demo_access.enabled())
+
+
+async def _users_for_email(session: AsyncSession, email: str) -> list[User]:
+    return list(
+        (
+            await session.execute(
+                select(User)
+                .where(func.lower(User.email) == email)
+                .order_by(User.created_at, User.id)
+            )
+        ).scalars().all()
+    )
+
+
+async def _open_demo_session(
+    session: AsyncSession, response: Response, user: User
+) -> SessionOut:
+    """Issue one public-demo session. Never writes firebase_uid."""
+    if user.public_demo is not True:
+        raise HTTPException(status_code=403, detail=_DEMO_OWNER_REFUSED)
+    if user.status == UserStatus.disabled:
+        raise HTTPException(status_code=403, detail="Account unavailable")
+    if user.status == UserStatus.invited:
+        user.status = UserStatus.active
+    await staff_invites.accept_pending_invite(session, user.id)
+    if user.role == Role.candidate:
+        await candidate_identity.link_on_sign_in(
+            session,
+            user,
+            firebase_auth.FirebaseIdentity(
+                uid="demo",
+                email=user.email,
+                name=user.full_name,
+                provider="demo",
+                email_verified=False,
+            ),
+        )
+    await record_auth_event(
+        session, action=AUTH_LOGIN_SUCCEEDED, actor_user_id=user.id,
+        tenant_id=user.tenant_id,
+        metadata={"provider": "demo", "via": "demo_session"},
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409, detail="This sign-in could not be linked to an account"
+        ) from exc
+    await _issue_session(response, user, audience_for_role(user.role))
+    return SessionOut(
+        user=await _user_out(session, user),
+        capabilities=await _capabilities(session, user),
+    )
+
+
+def _prefer_client(users: list[User]) -> User:
+    for user in users:
+        if user.role == Role.client:
+            return user
+    return users[0]
+
+
+@router.post(
+    "/demo/session",
+    response_model=SessionOut,
+    dependencies=[Depends(rate_limit("demo_session", limit=20, window=60))],
+)
+async def demo_session(
+    body: DemoSessionIn,
+    response: Response,
+    session: AsyncSession = Depends(get_identity_session),
+) -> SessionOut:
+    """Open a public demo session for any nonempty password.
+
+    A real account, the owner, a permanent demo tenant, and every provider
+    or BD role are refused. Company sign-in retrieves a public demo company
+    and does not create one. Candidate sign-in creates a public demo
+    candidate only when no user already has that email.
+    """
+    demo_access.require_enabled()
+    email = _normal_email(body.email)
+    settings = get_settings()
+    if _is_owner_email(email, settings.owner_email):
+        raise HTTPException(status_code=403, detail=_DEMO_OWNER_REFUSED)
+    portal = demo_access.PORTAL_TO_FILTER[body.portal]
+    if portal in {"owner", "bd"}:
+        raise HTTPException(
+            status_code=403,
+            detail=f"No {_PORTAL_LABEL[portal]} workspace is linked to this account",
+        )
+    rows = await _users_for_email(session, email)
+    if any(not row.public_demo for row in rows):
+        raise HTTPException(status_code=409, detail=_DEMO_EMAIL_REFUSED)
+    allowed = PORTAL_ROLES[portal]
+    eligible = [
+        row for row in rows
+        if row.public_demo and row.role in allowed and row.status != UserStatus.disabled
+    ]
+    if portal == "org":
+        if not eligible:
+            raise HTTPException(status_code=403, detail=_DEMO_COMPANY_MISSING)
+        return await _open_demo_session(session, response, _prefer_client(eligible))
+    if eligible:
+        return await _open_demo_session(session, response, eligible[0])
+    if rows:
+        if any(row.public_demo and row.status == UserStatus.disabled for row in rows):
+            raise HTTPException(status_code=403, detail="Account unavailable")
+        raise HTTPException(
+            status_code=403,
+            detail=f"No {_PORTAL_LABEL[portal]} workspace is linked to this account",
+        )
+    full_name = " ".join((body.full_name or "").split()) or None
+    user = User(
+        role=Role.candidate,
+        email=email,
+        full_name=full_name,
+        tenant_id=None,
+        status=UserStatus.active,
+        firebase_uid=None,
+        auth_providers=["demo"],
+        public_demo=True,
+    )
+    session.add(user)
+    await session.flush()
+    return await _open_demo_session(session, response, user)
 
 
 async def _user_out(session: AsyncSession, user: User) -> UserOut:

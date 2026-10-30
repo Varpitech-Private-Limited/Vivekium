@@ -110,6 +110,7 @@ def portal_for_role(role: Role | str) -> str:
 def eligible_login_users(users: Sequence[User], *, owner_email: str) -> list[User]:
     """Pure filter for login eligibility:
     - disabled users never log in;
+    - a public demo row never logs in through Firebase or select-context;
     - a super_admin row whose email is not the platform owner's is treated as
       nonexistent (owner invariant, defense in depth; the migration deletes
       such rows).
@@ -117,6 +118,8 @@ def eligible_login_users(users: Sequence[User], *, owner_email: str) -> list[Use
     out: list[User] = []
     for u in users:
         if u.status == UserStatus.disabled:
+            continue
+        if u.public_demo:
             continue
         if u.role == Role.super_admin and (
             (u.email or "").strip().lower() != (owner_email or "").strip().lower()

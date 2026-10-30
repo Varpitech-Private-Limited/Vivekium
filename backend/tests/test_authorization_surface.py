@@ -155,6 +155,11 @@ PUBLIC_BY_DESIGN: dict[str, str] = {
     # The authentication endpoint itself. It cannot require authorization: it
     # is what produces the session. Rate limited instead (services/rate_limit).
     "/firebase/session": "creates the session",
+    # Public demo sign-in (A-23, 2026-10-30). 404 unless DEMO_MODE is on.
+    # Rate limited. It never binds a real account.
+    "/demo/session": "public demo session, 404 unless DEMO_MODE is on",
+    # Public demo company registration. Same flag. No CAPTCHA, no Razorpay.
+    "/demo": "public demo company registration, 404 unless DEMO_MODE is on",
     # The CAPTCHA (auth hardening, 2026-09-29). Answered before anybody has
     # a session, so it cannot require one. The challenge writes one Redis row
     # and the verify spends it; both are rate limited, and the challenge's own

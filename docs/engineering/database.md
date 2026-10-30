@@ -1,7 +1,7 @@
 # Database rules
 
 **Status:** current. **Reviewed:** 2026-10-14. Loaded on demand by `.claude/rules/database.md`.
-**Scope:** `backend/app/models/`, `backend/alembic/versions/` (head `0136_monthly_assessment_plans`; linear chain, `alembic heads` is one; `0127` was never used), RLS, grants.
+**Scope:** `backend/app/models/`, `backend/alembic/versions/` (head `0137_public_demo`; linear chain, `alembic heads` is one; `0127` was never used), RLS, grants.
 
 ## Tenant isolation
 

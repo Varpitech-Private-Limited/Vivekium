@@ -110,3 +110,4 @@ logs, each pinned to its constant by a test:
 | `judge0_enabled`, `judge0_instance_enabled`, `judge0_clients_enabled` | false | nothing is provisioned; removed with the sandbox module |
 | `transcribe_enabled` | false until the deploy stage's apply | spoken answers are not offered while false |
 | `INBOUND_EMAIL_DOMAIN` | empty | the region does not receive SES mail; reply threading is inert |
+| `DEMO_MODE` | off | Public demo mode is off unless an operator sets `DEMO_MODE`. On `ENVIRONMENT=production`, `DEMO_MODE` also requires `DEMO_MODE_CONFIRM=public-demo`. This row is not a live switch. [DEMO_MODE.md](DEMO_MODE.md) |

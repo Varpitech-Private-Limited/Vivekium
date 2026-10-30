@@ -1146,6 +1146,13 @@ class Settings(BaseSettings):
     #: Set by terraform on the containers that SIGN (the API service and the
     #: task worker). See `_refuse_an_unconfigured_jwt_secret`.
     require_jwt_secret: bool = False
+    # Public demo is off unless DEMO_MODE is set. Production also needs
+    # DEMO_MODE_CONFIRM=public-demo, enforced by the validator below.
+    demo_mode: bool = False
+    demo_mode_confirm: str = ""
+    demo_initial_credits: int = Field(default=25, ge=1, le=10000)
+    demo_email_allowlist: str = ""
+    demo_retention_days: int = Field(default=14, ge=1)
 
     @model_validator(mode="after")
     def _refuse_an_unconfigured_jwt_secret(self) -> "Settings":
@@ -1193,6 +1200,25 @@ class Settings(BaseSettings):
                 "session cookies and every signed link, so a "
                 "default or empty value is a full platform compromise. Set it "
                 "in Secrets Manager and redeploy."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _refuse_demo_mode_without_confirm(self) -> "Settings":
+        """Production and pilot cannot turn the public demo on by accident.
+
+        The live task sets ENVIRONMENT=production. A process that boots with
+        ENVIRONMENT=pilot is held to the same confirm phrase. Development
+        and test may set DEMO_MODE without it.
+        """
+        environment = (self.environment or "").strip().lower()
+        if (
+            environment in {"production", "pilot"}
+            and self.demo_mode
+            and self.demo_mode_confirm != "public-demo"
+        ):
+            raise ValueError(
+                "DEMO_MODE on production requires DEMO_MODE_CONFIRM=public-demo."
             )
         return self
 

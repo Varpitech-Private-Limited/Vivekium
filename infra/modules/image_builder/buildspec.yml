@@ -9,6 +9,7 @@
 #                                                    the Lambda functions run
 #                                                    the same digest
 #   frontend:sha-<12>     with the six NEXT_PUBLIC_FIREBASE_* build args
+#                         and NEXT_PUBLIC_DEMO_MODE (true or false)
 #   analysis:sha-<12>     only when BUILD_ANALYSIS is true
 #
 # Every image is a single-platform Docker (non-OCI) manifest with no
@@ -113,6 +114,15 @@ phases:
           echo "==> frontend ${IMAGE_TAG}"
           # `--build-arg NAME` with no value reads NAME from this environment,
           # so the values never appear on a command line or in the build log.
+          # An empty demo arg would override the Dockerfile default of false,
+          # so an unset value is set here, in the same shell as the build.
+          if [ -z "${NEXT_PUBLIC_DEMO_MODE:-}" ]; then
+            export NEXT_PUBLIC_DEMO_MODE=false
+          fi
+          case "$NEXT_PUBLIC_DEMO_MODE" in
+            true|false) ;;
+            *) echo "REFUSED: NEXT_PUBLIC_DEMO_MODE must be true or false." >&2; exit 1 ;;
+          esac
           docker buildx build --platform linux/arm64 \
             --provenance=false --sbom=false \
             --build-arg NEXT_PUBLIC_FIREBASE_API_KEY \
@@ -121,6 +131,7 @@ phases:
             --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
             --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
             --build-arg NEXT_PUBLIC_FIREBASE_APP_ID \
+            --build-arg NEXT_PUBLIC_DEMO_MODE \
             --output "type=image,name=${FRONTEND_REPOSITORY_URI}:${IMAGE_TAG},oci-mediatypes=false,push=true" \
             frontend
         fi

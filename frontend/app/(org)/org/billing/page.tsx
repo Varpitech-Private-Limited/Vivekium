@@ -20,6 +20,7 @@ import * as React from "react";
 import { AlertTriangle, Download } from "lucide-react";
 
 import { API_BASE, ApiError, apiGet, apiPost } from "@/lib/api";
+import { demoModeEnabled } from "@/lib/demo-mode";
 import { useAuth } from "@/lib/auth-context";
 import { CAP } from "@/lib/permissions";
 import { usePermissions } from "@/lib/use-permissions";
@@ -251,6 +252,21 @@ export default function BillingPage() {
     async (pack: CreditPack) => {
       setPayBusy(true);
       try {
+        if (demoModeEnabled()) {
+          const overview = await apiPost<BillingOverview>(
+            "/billing/demo/purchase",
+            { pack_slug: pack.slug }
+          );
+          setData(overview);
+          setSelectedSlug(null);
+          toast({
+            title: "Credits added",
+            description: `Payment confirmed. Your new balance is ${overview.credits.balance_credits} credits. Your GST invoice is under Purchases and invoices below.`,
+          });
+          setPayBusy(false);
+          await Promise.all([load(), loadPacks(), loadPurchases()]);
+          return;
+        }
         const order = await apiPost<PurchaseCreateResponse>(
           "/billing/purchase",
           { pack_slug: pack.slug }

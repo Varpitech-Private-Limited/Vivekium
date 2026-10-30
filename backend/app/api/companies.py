@@ -1141,6 +1141,13 @@ async def setup_invite_password(
     setup never leaves a sign-in that no account owns.
     """
     from app.api import auth as auth_api
+    from app.services import demo_access
+
+    if demo_access.enabled():
+        invite = await _resolve_invite(session, token)
+        tenant = await session.get(Tenant, invite.tenant_id)
+        if tenant is not None and tenant.public_demo:
+            return await _accept_public_demo_invite(body, response, session, invite)
 
     password_policy.require_valid(body.password)
     await captcha.consume_proof(body.captcha_proof, "invite_join")
@@ -1187,6 +1194,55 @@ async def setup_invite_password(
             await run_in_threadpool(firebase_auth.delete_identity, uid)
         except firebase_auth.IdentityDeletionFailed:
             logger.error("invite_setup.orphan_identity_left")
+        raise HTTPException(
+            status_code=409, detail="This sign-in could not be linked to an account"
+        ) from exc
+    await auth_api._issue_session(response, staff_user, audience_for_role(staff_user.role))  # noqa: SLF001
+    return SessionOut(
+        user=await auth_api._user_out(session, staff_user),  # noqa: SLF001
+        capabilities=await auth_api._capabilities(session, staff_user),  # noqa: SLF001
+    )
+
+
+async def _accept_public_demo_invite(
+    body: InviteSetupPasswordIn,
+    response: Response,
+    session: AsyncSession,
+    invite,
+) -> SessionOut:
+    """Accept a public demo invite without Firebase, a password rule, or CAPTCHA.
+
+    The invite token is the authorization. The password is nonempty and is
+    not stored. firebase_uid stays empty so a later real sign-in cannot bind
+    this row.
+    """
+    from app.api import auth as auth_api
+
+    staff_user = await session.get(User, invite.user_id)
+    if staff_user is None or staff_user.status == UserStatus.disabled:
+        raise HTTPException(
+            status_code=403,
+            detail="This invitation is no longer available. Ask your admin for a new one.",
+        )
+    if staff_user.firebase_uid:
+        raise HTTPException(status_code=409, detail=INVITE_IDENTITY_EXISTS_DETAIL)
+    name = (body.full_name or "").strip() or staff_user.full_name
+    staff_user.public_demo = True
+    staff_user.auth_providers = sorted(set((staff_user.auth_providers or []) + ["demo"]))
+    if name and not staff_user.full_name:
+        staff_user.full_name = name
+    if staff_user.status == UserStatus.invited:
+        staff_user.status = UserStatus.active
+    await staff_invites.accept_pending_invite(session, staff_user.id)
+    await record_auth_event(
+        session, action=AUTH_LOGIN_SUCCEEDED, actor_user_id=staff_user.id,
+        tenant_id=staff_user.tenant_id,
+        metadata={"provider": "demo", "via": "invite_setup"},
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
         raise HTTPException(
             status_code=409, detail="This sign-in could not be linked to an account"
         ) from exc

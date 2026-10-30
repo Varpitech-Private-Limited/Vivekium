@@ -67,6 +67,7 @@ from app.schemas.billing import (
 )
 from app.services import capabilities as caps
 from app.services import credit_packs, credits, monthly_plans, razorpay
+from app.services import demo_access
 from app.services.audit import audit
 
 log = logging.getLogger(__name__)
@@ -166,6 +167,7 @@ async def subscribe_monthly(
     session: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
     tenant = await _tenant_or_404(session, user.tenant_id)
+    _refuse_public_demo_gateway(tenant)
     try:
         return await monthly_plans.begin_subscription(session, tenant, body.plan_slug)
     except ValueError as exc:
@@ -187,6 +189,7 @@ async def verify_monthly_checkout(
     ):
         raise HTTPException(status_code=400, detail="Payment could not be verified")
     tenant = await _tenant_or_404(session, user.tenant_id)
+    _refuse_public_demo_gateway(tenant)
     if tenant.razorpay_subscription_id != body.razorpay_subscription_id:
         raise HTTPException(status_code=403, detail="Payment belongs to another company")
     payment = await razorpay.fetch_payment(body.razorpay_payment_id)
@@ -213,6 +216,7 @@ async def change_monthly_plan(
     session: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
     tenant = await _tenant_or_404(session, user.tenant_id)
+    _refuse_public_demo_gateway(tenant)
     plan = monthly_plans.BY_SLUG.get(body.plan_slug)
     if not plan:
         raise HTTPException(status_code=404, detail="Unknown monthly plan")
@@ -232,6 +236,7 @@ async def cancel_monthly(
     session: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
     tenant = await _tenant_or_404(session, user.tenant_id)
+    _refuse_public_demo_gateway(tenant)
     if not tenant.razorpay_subscription_id or tenant.subscription_status != "active":
         raise HTTPException(status_code=409, detail="No active subscription")
     await razorpay.cancel_subscription(tenant.razorpay_subscription_id)
@@ -338,6 +343,14 @@ async def _summary_out(session: AsyncSession, tenant_id: uuid.UUID) -> CreditSum
         ),
         unlimited=summary.unlimited,
     )
+
+
+def _refuse_public_demo_gateway(tenant: Tenant) -> None:
+    if tenant.public_demo:
+        raise HTTPException(
+            status_code=409,
+            detail="Demo workspaces do not use a payment gateway.",
+        )
 
 
 async def _tenant_or_404(session: AsyncSession, tenant_id: uuid.UUID) -> Tenant:
@@ -460,6 +473,7 @@ async def create_credit_purchase(
     message, so the form can show the reason verbatim.
     """
     tenant = await _tenant_or_404(session, user.tenant_id)
+    _refuse_public_demo_gateway(tenant)
     try:
         purchase = await credit_packs.create_purchase(
             session,
@@ -497,6 +511,45 @@ async def create_credit_purchase(
     )
 
 
+@router.post("/demo/purchase", response_model=BillingOverviewOut)
+async def demo_credit_purchase(
+    body: CreditPurchaseIn,
+    user: CurrentUser = Depends(require_capability(caps.MANAGE_BILLING)),
+    session: AsyncSession = Depends(get_tenant_db),
+) -> BillingOverviewOut:
+    """Settle a catalogue pack without calling Razorpay.
+
+    404 while demo mode is off. 409 for any tenant that is not a public
+    demo workspace. The grant is the same settle_purchase path as a paid pack.
+    """
+    demo_access.require_enabled()
+    tenant = await _tenant_or_404(session, user.tenant_id)
+    if tenant.public_demo is not True:
+        raise HTTPException(
+            status_code=409,
+            detail="Demo workspaces do not use a payment gateway.",
+        )
+    if not body.pack_slug:
+        raise HTTPException(status_code=422, detail="Unknown credit pack.")
+    try:
+        purchase = await credit_packs.simulate_demo_purchase(
+            session, tenant, user.user_id, body.pack_slug
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await audit(
+        session, tenant_id=tenant.id, actor_user_id=user.user_id,
+        action="credit_purchase_demo_settled", target_type="credit_purchase",
+        target_id=purchase.id,
+        metadata={
+            "pack_slug": purchase.pack_slug,
+            "credits": purchase.credits_purchased,
+            "payment": "simulated",
+        },
+    )
+    return await billing_overview(user=user, session=session)
+
+
 @router.post("/purchase/verify", response_model=BillingOverviewOut)
 async def verify_credit_purchase(
     body: CreditPurchaseVerifyIn,
@@ -509,6 +562,8 @@ async def verify_credit_purchase(
     staring at the old balance until the webhook lands. Settlement is
     idempotent, so whichever of this and the webhook runs second is a no-op.
     """
+    tenant = await _tenant_or_404(session, user.tenant_id)
+    _refuse_public_demo_gateway(tenant)
     if not razorpay.verify_order_signature(
         order_id=body.razorpay_order_id,
         payment_id=body.razorpay_payment_id,

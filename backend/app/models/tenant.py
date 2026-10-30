@@ -89,6 +89,10 @@ class Tenant(Base, UUIDPKMixin, CreatedAtMixin):
     is_demo: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # public demo workspace. Not the permanent is_demo billing exemption.
+    public_demo: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     current_plan_slug: Mapped[str | None] = mapped_column(String(20))
     pending_plan_slug: Mapped[str | None] = mapped_column(String(20))
     razorpay_subscription_id: Mapped[str | None] = mapped_column(String(100))

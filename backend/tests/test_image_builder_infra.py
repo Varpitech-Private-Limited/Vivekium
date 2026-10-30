@@ -303,9 +303,15 @@ def test_the_backend_is_one_push_under_the_tag_and_the_lambda_sibling() -> None:
 def test_the_frontend_gets_the_six_firebase_args_from_the_environment_only() -> None:
     (frontend,) = [line for line in _buildx_invocations() if line.endswith(" frontend")]
     args = re.findall(r"--build-arg (\S+)", frontend)
-    assert args == FIREBASE_NAMES, "a value on the command line would be in the build log"
+    assert args == [*FIREBASE_NAMES, "NEXT_PUBLIC_DEMO_MODE"], (
+        "a value on the command line would be in the build log"
+    )
+    assert "NEXT_PUBLIC_DEMO_MODE must be true or false." in ALL_COMMANDS
     dockerfile = (REPO / "frontend" / "Dockerfile").read_text(encoding="utf-8")
     assert re.findall(r"^ARG (NEXT_PUBLIC_FIREBASE_\w+)", dockerfile, re.MULTILINE) == FIREBASE_NAMES
+    assert re.search(r"^ARG NEXT_PUBLIC_DEMO_MODE=false$", dockerfile, re.MULTILINE)
+    assert "--public-demo" in SCRIPT_TEXT
+    assert "NEXT_PUBLIC_DEMO_MODE" in SCRIPT_TEXT
 
 
 def test_the_analysis_token_is_a_buildkit_secret_never_a_build_arg() -> None:

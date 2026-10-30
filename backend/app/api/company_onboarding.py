@@ -1,6 +1,7 @@
 """Company self-registration: `/api/v1/company-onboarding` (owner spec 2.2, 5, 24).
 
     POST /register             details + CAPTCHA -> a security code (or a notice)
+    POST /demo                 public demo company, simulated charge, org session
     POST /code/verify          the code -> onboarding tenant, invited client, cookie
     POST /code/resend          a new code for a registration already started
     GET  /state                where this browser's registration stands (derived)
@@ -57,8 +58,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.api.admin import _seed_permissions, next_free_domain
+from app.core.config import get_settings
 from app.core.db import get_session_factory, superadmin_scope
 from app.core.security import AUDIENCE_ORG
+from app.models.billing import SUBUNITS_PER_CREDIT, BillingTransaction
 from app.models.company_registration import (
     OPEN_STATUSES,
     REGISTRATION_ACTIVATED,
@@ -76,6 +79,7 @@ from app.schemas.company_onboarding import (
     ActivateIn,
     CodeResendIn,
     CodeVerifyIn,
+    DemoCompanyIn,
     OnboardingStateOut,
     RegistrationAcceptedOut,
     RegistrationIn,
@@ -83,6 +87,8 @@ from app.schemas.company_onboarding import (
 from app.services import (
     captcha,
     company_onboarding as onboarding,
+    credits,
+    demo_access,
     monthly_plans,
     employer_pages,
     firebase_auth,
@@ -375,6 +381,155 @@ async def register(
     return RegistrationAcceptedOut(message=ACCEPTED_MESSAGE)
 
 
+_DEMO_EMAIL_REFUSED = (
+    "This email address cannot be used for the demo. Use a different email."
+)
+
+
+async def _issue_org_session(response: Response, session: AsyncSession, user: User) -> SessionOut:
+    from app.api import auth as auth_api
+
+    await auth_api._issue_session(response, user, AUDIENCE_ORG)  # noqa: SLF001
+    return SessionOut(
+        user=await auth_api._user_out(session, user),  # noqa: SLF001
+        capabilities=await auth_api._capabilities(session, user),  # noqa: SLF001
+    )
+
+
+@router.post(
+    "/demo",
+    response_model=SessionOut,
+    dependencies=[Depends(rate_limit("company_register", limit=10, window=600))],
+)
+async def register_demo_company(
+    body: DemoCompanyIn,
+    response: Response,
+    session: AsyncSession = Depends(get_onboarding_db),
+) -> SessionOut:
+    """Create an active public demo company and open its session.
+
+    No CAPTCHA and no Razorpay call. One zero-amount subscription charge
+    marks the company paid, and one credit grant funds the ledger. The same
+    public demo email returns the existing company session.
+    """
+    demo_access.require_enabled()
+    from app.api import auth as auth_api
+
+    email = body.email
+    settings = get_settings()
+    if auth_api._is_owner_email(email, settings.owner_email):  # noqa: SLF001
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_DEMO_EMAIL_REFUSED)
+    rows = list(
+        (
+            await session.execute(select(User).where(func.lower(User.email) == email))
+        ).scalars().all()
+    )
+    if any(not row.public_demo for row in rows):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_DEMO_EMAIL_REFUSED)
+    org_roles = auth_api.PORTAL_ROLES["org"]
+    existing = [
+        row for row in rows
+        if row.public_demo and row.role in org_roles and row.status != UserStatus.disabled
+    ]
+    if existing:
+        chosen = next((row for row in existing if row.role == Role.client), existing[0])
+        return await _issue_org_session(response, session, chosen)
+    if await _name_taken(session, body.company_name, None):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=COMPANY_NAME_TAKEN_DETAIL)
+
+    now = _now()
+    taken = set((await session.execute(select(Tenant.domain))).scalars().all())
+    tenant = Tenant(
+        id=uuid.uuid4(),
+        name=body.company_name,
+        domain=next_free_domain(derive_tenant_domain(body.company_name, email), taken),
+        industry=body.industry,
+        status=CUSTOMER_ACTIVE,
+        is_demo=False,
+        public_demo=True,
+        subscription_status="active",
+        current_plan_slug="starter",
+        subscription_started_at=now,
+        notes="Public demo company. Created by demo mode. No payment was collected.",
+    )
+    session.add(tenant)
+    await session.flush()
+    tenant.razorpay_subscription_id = f"demo-sub-{tenant.id}"
+    await employer_pages.assign_slug(session, tenant)
+    user = User(
+        tenant_id=tenant.id,
+        role=Role.client,
+        email=email,
+        phone=body.phone,
+        full_name=f"{body.first_name} {body.last_name}",
+        status=UserStatus.active,
+        firebase_uid=None,
+        auth_providers=["demo"],
+        public_demo=True,
+    )
+    session.add(user)
+    _seed_permissions(session, tenant.id)
+    await session.flush()
+    registration = CompanyRegistration(
+        id=uuid.uuid4(),
+        email=email,
+        first_name=body.first_name,
+        last_name=body.last_name,
+        phone=body.phone,
+        company_name=body.company_name,
+        industry=body.industry,
+        industry_other=body.industry_other,
+        status=REGISTRATION_ACTIVATED,
+        email_verified_at=now,
+        tenant_id=tenant.id,
+        user_id=user.id,
+        activated_at=now,
+    )
+    session.add(registration)
+    session.add(
+        BillingTransaction(
+            tenant_id=tenant.id,
+            status="success",
+            transaction_type="subscription_charge",
+            amount_inr=0,
+            subtotal_inr=0,
+            gst_inr=0,
+            razorpay_payment_id=f"demo-reg-{registration.id}",
+            razorpay_subscription_id=tenant.razorpay_subscription_id,
+            plan_slug="starter",
+            assessments_granted=settings.demo_initial_credits,
+            notes="Public demo registration. No payment was collected.",
+        )
+    )
+    await credits.grant(
+        session,
+        tenant_id=tenant.id,
+        subunits=settings.demo_initial_credits * SUBUNITS_PER_CREDIT,
+        idempotency_key=f"demo-allocation:{tenant.id}",
+        metadata={"source": "public_demo_registration"},
+    )
+    await audit(
+        session, tenant_id=tenant.id, actor_user_id=user.id,
+        action=onboarding.AUDIT_ACTIVATED, target_type="company_registration",
+        target_id=registration.id,
+        metadata={"payment": "simulated", "credits": settings.demo_initial_credits},
+    )
+    await record_auth_event(
+        session, action=AUTH_LOGIN_SUCCEEDED, actor_user_id=user.id,
+        tenant_id=tenant.id, metadata={"provider": "demo", "via": "demo_company"},
+    )
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=COMPANY_NAME_TAKEN_DETAIL,
+        ) from exc
+    await rbac.invalidate_role_permissions(tenant.id)
+    return await _issue_org_session(response, session, user)
+
+
 @router.post(
     "/code/resend",
     response_model=RegistrationAcceptedOut,
@@ -510,6 +665,11 @@ async def onboarding_monthly_subscribe(
     session: AsyncSession = Depends(get_onboarding_db),
 ) -> dict:
     registration, tenant = await _verified_registration(session, registration_id, lock=True)
+    if tenant.public_demo:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Demo workspaces do not use a payment gateway.",
+        )
     if body.plan_slug != "starter":
         raise HTTPException(status_code=422, detail="The 30-day pilot starts on Starter")
     if await onboarding.has_paid(session, tenant.id):
@@ -536,6 +696,11 @@ async def onboarding_monthly_verify(
     session: AsyncSession = Depends(get_onboarding_db),
 ) -> OnboardingStateOut:
     registration, tenant = await _verified_registration(session, registration_id)
+    if tenant.public_demo:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Demo workspaces do not use a payment gateway.",
+        )
     if not razorpay.verify_subscription_signature(
         subscription_id=body.razorpay_subscription_id,
         payment_id=body.razorpay_payment_id,

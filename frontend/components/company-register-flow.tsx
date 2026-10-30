@@ -21,6 +21,8 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { useRouter } from "next/navigation";
 
 import { ApiError, apiGet, apiPost } from "@/lib/api";
+import { demoModeEnabled } from "@/lib/demo-mode";
+import { apiErrorMessage } from "@/lib/validation-errors";
 import { firebaseAuth } from "@/lib/firebase";
 import { friendlyAuthError } from "@/lib/firebase-session";
 import { useAuth } from "@/lib/auth-context";
@@ -162,6 +164,11 @@ export function CompanyRegisterFlow() {
       setDetails((current) => ({ ...current, [key]: event.target.value })),
   });
 
+  const finish = (session: AuthSession) => {
+    setSession(session.user, session.capabilities ?? []);
+    router.replace("/org");
+  };
+
   const submitDetails = (event: React.FormEvent) => {
     event.preventDefault();
     const required: Array<keyof Details> = [
@@ -175,7 +182,30 @@ export function CompanyRegisterFlow() {
       setError("Tell us your industry when you choose Other.");
       return;
     }
+    if (demoModeEnabled() && !password.trim()) {
+      setError("Enter a password.");
+      return;
+    }
     run(async () => {
+      if (demoModeEnabled()) {
+        try {
+          finish(
+            await apiPost<AuthSession>(`${BASE}/demo`, {
+              ...details,
+              industry_other:
+                details.industry === "Other" ? details.industry_other : null,
+              password,
+            })
+          );
+        } catch (failure) {
+          if (failure instanceof ApiError && failure.status === 409) {
+            setError(apiErrorMessage(failure));
+            return;
+          }
+          throw failure;
+        }
+        return;
+      }
       const proof = await captcha.current!.prove();
       await apiPost(`${BASE}/register`, {
         ...details,
@@ -262,11 +292,6 @@ export function CompanyRegisterFlow() {
         });
       });
     });
-
-  const finish = (session: AuthSession) => {
-    setSession(session.user, session.capabilities ?? []);
-    router.replace("/org");
-  };
 
   const submitPassword = (event: React.FormEvent) => {
     event.preventDefault();
@@ -434,10 +459,41 @@ export function CompanyRegisterFlow() {
               <Input id="reg-industry-other" {...field("industry_other")} />
             </div>
           ) : null}
-          <Captcha ref={captcha} purpose="company_register" disabled={busy} idPrefix="reg-captcha" />
+          {demoModeEnabled() ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="reg-demo-password">Password</Label>
+              <div className="relative">
+                <Input
+                  id="reg-demo-password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  value={password}
+                  disabled={busy}
+                  className="pr-11"
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" aria-hidden="true" />
+                  ) : (
+                    <Eye className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {demoModeEnabled() ? null : (
+            <Captcha ref={captcha} purpose="company_register" disabled={busy} idPrefix="reg-captcha" />
+          )}
           <Button size="lg" className="w-full" disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            Send security code
+            {demoModeEnabled() ? "Create demo workspace" : "Send security code"}
           </Button>
         </form>
         <p className="text-center text-sm">

@@ -1581,7 +1581,12 @@ module "ecs" {
       image         = "${module.ecr.repository_urls["analysis"]}:${local.analysis_image_tag}"
       cpu           = 2048
       memory        = 8192
-      desired_count = local.service_count
+      # Fargate on-demand vCPU quota in ap-south-2 is 2 (L-3032A538).
+      # This task is 2 vCPU. With the API and frontend also placed, a desired
+      # count of 1 cannot start and the API stays at 0 running tasks.
+      # Scaled to 0 on 2026-10-30 so the API could place. Leave it at 0
+      # until that quota is raised. Do not set this back to local.service_count.
+      desired_count = 0
       # Two, not four: each analysis task is 2 vCPU / 8 GB, the costliest
       # step in the cluster, and its workload (fifteen-second audio chunks)
       # has never occurred in this environment.
@@ -2050,6 +2055,13 @@ module "scheduler" {
     # Terraform half of the entry in app/workers/schedule.py.
     "readypick-expire-credit-lots" = {
       task            = "pickready.expire_credit_lots"
+      rate_expression = "rate(1440 minutes)"
+    }
+    # Public demo retention. The Terraform half of the entry in
+    # app/workers/schedule.py. Deletes expired public_demo tenants and
+    # candidate users only.
+    "readypick-purge-public-demo" = {
+      task            = "pickready.purge_public_demo"
       rate_expression = "rate(1440 minutes)"
     }
     # Phase 6 WP6-C. The Terraform half of the entry in

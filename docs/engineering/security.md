@@ -1,13 +1,14 @@
 # Security and privacy rules
 
-**Status:** current. **Reviewed:** 2026-10-14. Loaded on demand by `.claude/rules/security.md`.
-Decisions A-01 to A-13 in [../decisions/REGISTER.md](../decisions/REGISTER.md).
+**Status:** current. **Reviewed:** 2026-10-14. **Updated:** 2026-10-30 (A-23 amends A-02). Loaded on demand by `.claude/rules/security.md`.
+Decisions A-01 to A-13 in [../decisions/REGISTER.md](../decisions/REGISTER.md). A-23 (2026-10-30) amends A-02 only while `DEMO_MODE` is on.
 
 ## Authentication and sessions
 
 - Firebase is identity only; database roles and `role_permissions` stay authoritative. Google or email and password; no phone, no login OTP.
 - Google never authenticates a company role (`firebase_auth.assert_provider_allowed`). Team members are invite-only; the server creates the password sign-in for exactly the invited email. Signing in as the invited user accepts the invitation.
-- Every auth surface takes a server-checked CAPTCHA proof (single-use, purpose-bound, HMAC-hashed in Redis, fails closed). The session exchange spends the proof before it reads the Firebase token. Tests mint proofs through `tests/captcha_support.py`.
+- Every existing auth surface takes a server-checked CAPTCHA proof (single-use, purpose-bound, HMAC-hashed in Redis, fails closed). No setting disables that check (A-02). The session exchange spends the proof before it reads the Firebase token. Tests mint proofs through `tests/captcha_support.py`.
+- **Public demo mode amends A-02 only while `DEMO_MODE` is on (A-23).** CAPTCHA still fails closed on every existing auth route. The only exception is the demo routes, and only when the flag is on: `POST /api/v1/auth/demo/session`, `POST /api/v1/company-onboarding/demo`, `POST /api/v1/billing/demo/purchase`, and the `public_demo` branch of invite setup-password. Those same routes are the only ones that skip Firebase and Razorpay, and only while the flag is on. `GET /api/v1/auth/demo-status` reports the flag and does not mint a session. On `ENVIRONMENT=production`, `DEMO_MODE` also requires `DEMO_MODE_CONFIRM=public-demo`; a missing confirm refuses to boot. The flag ships default off. The live site is not in demo mode. Detail: [../operations/DEMO_MODE.md](../operations/DEMO_MODE.md).
 - Security codes (registration, password reset or change) come from the platform sender only; production refuses a non-SES transport for them. The server resets and changes passwords and revokes every session and Firebase refresh token.
 - Three cookies, httpOnly, Secure, SameSite=Strict, no Max-Age: a session dies with the browser. The idle deadline is a Redis TTL moved only by `X-User-Activity: 1` within five seconds of a real input event. A cookie JWT with no `sid` is refused. Redis down is 503.
 - A route reaching both the staff and the candidate audience answers nobody. Candidate-route tests use a real session (`tests/candidate_session.py`), never a dependency override.

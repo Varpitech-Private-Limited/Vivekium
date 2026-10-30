@@ -93,7 +93,7 @@ Notable `backend/app/services/` packages: `hiring/` (Sutra, gates, runbook_data)
 
 ## 6. Data architecture
 
-Migrations: linear chain, head `0136_monthly_assessment_plans`; additive and guarded; run as a one-off job before traffic moves, never from every replica.
+Migrations: linear chain, head `0137_public_demo`; additive and guarded; run as a one-off job before traffic moves, never from every replica.
 
 - **Identity and tenancy:** users and Firebase mapping, tenants (`tenants.status`: onboarding, active, prospect, archived), company profiles and departments, roles, capabilities and per-user overrides, staff invitations, sessions in Redis, append-only `audit_log`.
 - **Job setup and contract:** `jobs`, `job_competencies` (the Skills store: bucket, priority, hidden evidence line, `authored_by`), `job_swot_analyses`, `job_skill_snapshots` (insert-only contract), `job_leadership_contexts`, `job_assignments`.

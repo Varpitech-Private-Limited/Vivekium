@@ -9,6 +9,7 @@
 | A table | `backend/app/models/`, `backend/alembic/versions/` | RLS policy and grant; revoke UPDATE if insert-only; export from `models/__init__.py` |
 | A background task | `workers/tasks.py` or `workers/tasks_*.py` | `@task(name, route, rls)`; dispatch with `dispatch_after_commit`; a real-Postgres test for `rls="tenant"` |
 | A scheduled sweep | `workers/schedule.py` and every environment's `module "scheduler"` | `tests/test_schedule_parity.py` compares both |
+| Public demo mode (A-23) | `DEMO_MODE`, `NEXT_PUBLIC_DEMO_MODE`, `DEMO_MODE_CONFIRM`, the demo routes, and `pickready.purge_public_demo` in `workers/schedule.py` | Schedule name `readypick-purge-public-demo` in every environment's scheduler; on production the confirm value is `public-demo`; default off; do not commit `demo_mode = true` in tfvars. [../operations/DEMO_MODE.md](../operations/DEMO_MODE.md) |
 | An LLM call | `config/llm_providers.py` first | Task type, timeout, budget, temperature, tokens, retries; register the prompt builder in `tests/test_ctc_never_in_prompt.py` |
 | A prompt | `backend/app/prompts/*.txt` | Bump `# version:`; good, bad and edge examples; sufficiency decided first |
 | A scoring rule | `services/hiring/runbook_data/*.yaml` | Cite the Runbook section; `test_runbook_parity.py` enforces it |

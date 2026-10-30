@@ -65,6 +65,7 @@ def send_security_email(to: str, template: str, context: dict):
     """Render the fixed template and send it from the platform sender."""
     from app.services import email_render, security_email
     from app.services.delivery_errors import DeliveryError
+    from app.services.demo_access import DemoEmailWithheld
 
     async def _task():
         subject, body = security_email.render(template, context)
@@ -85,6 +86,8 @@ def send_security_email(to: str, template: str, context: dict):
         except security_email.SecurityEmailRefused:
             status = "refused"
             raise
+        except DemoEmailWithheld:
+            status = "withheld"
         finally:
             # The delivery record names the recipient and the template, never
             # the context: the context is where the code is.
@@ -92,6 +95,8 @@ def send_security_email(to: str, template: str, context: dict):
                 await _record_delivery(to, template, status, message_id, failure)
             except Exception:  # noqa: BLE001 - never mask the delivery outcome
                 logger.exception("security_email.audit_failed template=%s", template)
+        if status == "withheld":
+            return {"status": "withheld"}
         logger.info("security_email.sent template=%s", template)
         return {"status": "sent"}
 

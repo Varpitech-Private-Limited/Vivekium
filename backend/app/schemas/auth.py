@@ -10,7 +10,7 @@ ever carried the retired dual-channel gate, and no screen ever read it.
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.enums import Role
 
@@ -92,6 +92,32 @@ ExchangePurpose = Literal[
 ]
 
 _PROOF = Field(min_length=16, max_length=128)
+
+
+class DemoSessionIn(BaseModel):
+    """Public demo sign-in. The password is accepted and not stored.
+
+    Firebase remains the real sign-in. This body is refused with 404 when
+    DEMO_MODE is off, and it never binds a row that is not public_demo.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+    portal: Literal["candidate", "company", "provider", "bd"]
+    full_name: str | None = Field(default=None, max_length=200)
+
+    @field_validator("password")
+    @classmethod
+    def _password(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Enter a password.")
+        return value
+
+
+class DemoStatusOut(BaseModel):
+    demo_mode: bool
 
 
 class FirebaseSessionIn(BaseModel):

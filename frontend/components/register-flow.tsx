@@ -9,6 +9,8 @@ import {
 } from "firebase/auth";
 import { useRouter } from "next/navigation";
 
+import { ApiError, apiPost } from "@/lib/api";
+import { demoModeEnabled } from "@/lib/demo-mode";
 import { createCandidateGoogleProvider, firebaseAuth } from "@/lib/firebase";
 import {
   exchangeFirebaseSession,
@@ -101,13 +103,41 @@ export function RegisterFlow() {
       setError("Enter a valid email address.");
       return;
     }
-    if (!passwordValid) {
+    if (!demoModeEnabled() && !passwordValid) {
       setError(
         "Use at least 8 characters with uppercase, lowercase, and a number."
       );
       return;
     }
     run(async () => {
+      if (demoModeEnabled()) {
+        try {
+          resolve(
+            await apiPost<FirebaseExchangeResult>("/auth/demo/session", {
+              email: email.trim(),
+              password,
+              portal: "candidate",
+              full_name: name.trim(),
+            })
+          );
+          return;
+        } catch (failure) {
+          if (
+            !(
+              failure instanceof ApiError &&
+              (failure.status === 409 || failure.status === 404)
+            )
+          ) {
+            throw failure;
+          }
+        }
+        if (!passwordValid) {
+          setError(
+            "Use at least 8 characters with uppercase, lowercase, and a number."
+          );
+          return;
+        }
+      }
       // The security check first: a wrong answer creates no sign-in.
       const proof = await captcha.current!.prove();
       const credential = await createUserWithEmailAndPassword(
@@ -271,7 +301,7 @@ export function RegisterFlow() {
             <Button
               size="lg"
               className="w-full"
-              disabled={busy || !passwordValid}
+              disabled={busy || (!demoModeEnabled() && !passwordValid)}
             >
               {busy ? (
                 <>

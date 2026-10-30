@@ -166,6 +166,50 @@ async def create_purchase(
     return purchase
 
 
+async def simulate_demo_purchase(
+    session: AsyncSession,
+    tenant: Tenant,
+    created_by: uuid.UUID | None,
+    pack_slug: str,
+) -> CreditPurchase:
+    """Insert a Starter purchase and settle it without calling Razorpay.
+
+    The order id is assigned after the first flush so it can carry the row
+    id, and the grant still happens only inside settle_purchase.
+    """
+    if tenant.public_demo is not True:
+        raise ValueError("Demo workspaces do not use a payment gateway.")
+    if pack_slug not in CREDIT_PACKS:
+        raise ValueError("Unknown credit pack.")
+    credit_count, bonus = CREDIT_PACKS[pack_slug]
+    setup_fee, waived = await setup_fee_for(session, tenant)
+    subtotal, tax, total = _price(credit_count, setup_fee)
+    purchase = CreditPurchase(
+        tenant_id=tenant.id,
+        created_by=created_by,
+        pack_slug=pack_slug,
+        credits_purchased=credit_count,
+        bonus_credits=bonus,
+        subtotal_inr=subtotal,
+        setup_fee_inr=setup_fee,
+        setup_fee_waived=waived,
+        gst_inr=tax,
+        total_inr=total,
+        status=PURCHASE_CREATED,
+        credit_validity_months=CREDIT_VALIDITY_MONTHS,
+    )
+    session.add(purchase)
+    await session.flush()
+    purchase.razorpay_order_id = f"demo_{purchase.id}"
+    await session.flush()
+    settled = await settle_purchase(
+        session, purchase, payment_id=f"demo-pay-{purchase.id}"
+    )
+    if settled is not True:
+        raise RuntimeError("Demo purchase did not settle.")
+    return purchase
+
+
 async def settle_purchase(
     session: AsyncSession, purchase: CreditPurchase, payment_id: str | None
 ) -> bool:

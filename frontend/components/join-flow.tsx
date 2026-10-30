@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { ApiError, apiGet, apiPost } from "@/lib/api";
+import { demoModeEnabled } from "@/lib/demo-mode";
 import { firebaseAuth } from "@/lib/firebase";
 import {
   exchangeFirebaseSession,
@@ -184,7 +185,44 @@ export function JoinFlow({ token }: { token: string }) {
     }
     setBusy(true);
     setError(null);
-    void (mode === "create" ? createAccount() : signInExisting())
+    void (async () => {
+      if (demoModeEnabled() && mode === "create") {
+        try {
+          joined(
+            await apiPost<AuthSession>(
+              `/companies/invites/${encodeURIComponent(token)}/setup-password`,
+              {
+                password,
+                captcha_proof: "demo-mode-placeholder",
+                full_name: name.trim() || null,
+              }
+            )
+          );
+          return;
+        } catch (failure) {
+          if (
+            failure instanceof ApiError &&
+            (failure.status === 404 || failure.status === 410)
+          ) {
+            setLoadError("This invitation is invalid or no longer available.");
+            return;
+          }
+          if (
+            failure instanceof ApiError &&
+            (failure.status === 400 || failure.status === 403)
+          ) {
+            await signInExisting();
+            return;
+          }
+          if (failure instanceof ApiError && failure.status === 409) {
+            setMode("signin");
+            setPassword("");
+          }
+          throw failure;
+        }
+      }
+      await (mode === "create" ? createAccount() : signInExisting());
+    })()
       .catch((failure) => {
         const direct =
           failure instanceof Error &&

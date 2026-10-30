@@ -25,7 +25,9 @@
 #
 #   backend:sha-<12>, backend:sha-<12>-fn   one build pushed under two names
 #   frontend:sha-<12>                       with the six NEXT_PUBLIC_FIREBASE_*
-#                                           values from frontend/.env.local
+#                                           values from frontend/.env.local, and
+#                                           NEXT_PUBLIC_DEMO_MODE (false unless
+#                                           --public-demo is passed)
 #   analysis:sha-<12>                       only with --with-analysis
 #
 # The tag is `sha-` plus the first twelve characters of the commit, exactly as
@@ -56,7 +58,8 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 usage: build-images-remote.sh <environment> (--with-analysis | --analysis-tag <tag>)
-                              [--commit <ref>] [--allow-non-main] [--timeout-minutes <n>]
+                              [--commit <ref>] [--allow-non-main] [--public-demo]
+                              [--timeout-minutes <n>]
 USAGE
   exit 2
 }
@@ -70,6 +73,7 @@ ALLOW_NON_MAIN=0
 WITH_ANALYSIS=0
 ANALYSIS_TAG=""
 TIMEOUT_MINUTES=80
+PUBLIC_DEMO=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -77,6 +81,7 @@ while [ "$#" -gt 0 ]; do
     --allow-non-main) ALLOW_NON_MAIN=1; shift ;;
     --with-analysis) WITH_ANALYSIS=1; shift ;;
     --analysis-tag) [ "$#" -ge 2 ] || usage; ANALYSIS_TAG="$2"; shift 2 ;;
+    --public-demo) PUBLIC_DEMO=true; shift ;;
     --timeout-minutes) [ "$#" -ge 2 ] || usage; TIMEOUT_MINUTES="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
@@ -282,6 +287,9 @@ if [ "$BUILD_BACKEND$BUILD_FRONTEND$BUILD_ANALYSIS" != "falsefalsefalse" ]; then
       fi
       overrides="${overrides},{\"name\":\"${var}\",\"value\":\"${value}\",\"type\":\"PLAINTEXT\"}"
     done
+    # true or false only. The buildspec refuses anything else, and an empty
+    # value would override the image default of false.
+    overrides="${overrides},{\"name\":\"NEXT_PUBLIC_DEMO_MODE\",\"value\":\"${PUBLIC_DEMO}\",\"type\":\"PLAINTEXT\"}"
   fi
 
   if [ "$BUILD_ANALYSIS" = true ]; then

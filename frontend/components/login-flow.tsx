@@ -5,6 +5,8 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { ApiError, apiPost, isNetworkError } from "@/lib/api";
+import { demoModeEnabled } from "@/lib/demo-mode";
 import { createCandidateGoogleProvider, firebaseAuth } from "@/lib/firebase";
 import {
   exchangeFirebaseSession,
@@ -18,6 +20,7 @@ import {
 import { homePathForRole, useAuth } from "@/lib/auth-context";
 import { currentNextPath, withNext } from "@/lib/next-destination";
 import type { AuthContextsResponse, AuthSession } from "@/lib/types";
+import { apiErrorMessage } from "@/lib/validation-errors";
 import { AuthDivider, AuthLink, AuthShell } from "@/components/auth-shell";
 import {
   CAPTCHA_EMPTY_MESSAGE,
@@ -150,6 +153,34 @@ export function LoginFlow({
       return;
     }
     run(async () => {
+      if (demoModeEnabled()) {
+        try {
+          resolve(
+            await apiPost<FirebaseExchangeResult>("/auth/demo/session", {
+              email: email.trim(),
+              password,
+              portal: surface,
+            })
+          );
+          return;
+        } catch (failure) {
+          if (
+            surface === "company" &&
+            failure instanceof ApiError &&
+            (failure.status === 403 || isNetworkError(failure))
+          ) {
+            setError(apiErrorMessage(failure));
+            return;
+          }
+          const fallThrough =
+            failure instanceof ApiError &&
+            (failure.status === 409 ||
+              failure.status === 404 ||
+              (failure.status === 403 &&
+                (surface === "provider" || surface === "bd")));
+          if (!fallThrough) throw failure;
+        }
+      }
       // The security check first: a wrong answer costs no Firebase sign-in.
       const proof = await captcha.current!.prove();
       const credential = await signInWithEmailAndPassword(

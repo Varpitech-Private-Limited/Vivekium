@@ -326,6 +326,12 @@ SCHEDULE: tuple[ScheduledTask, ...] = (
             "rather than inferred from silence."
         ),
     ),
+    ScheduledTask(
+        rule="readypick-purge-public-demo",
+        task="pickready.purge_public_demo",
+        interval_minutes=1440,
+        why="Delete expired public demo companies and candidate users.",
+    ),
 
 )
 

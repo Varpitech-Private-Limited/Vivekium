@@ -535,6 +535,15 @@ _PUBLIC_BY_DESIGN: dict[str, str] = {
         "the load balancer's health check. It returns a status word and no data."
     ),
     # Sign-in. A route that mints a session cannot require one.
+    "/api/v1/auth/demo-status": (
+        "reports whether public demo mode is on. It sets no cookie and "
+        "returns one boolean. When the flag is off the answer is false."
+    ),
+    "/api/v1/auth/demo/session": (
+        "opens a session for a public demo identity when DEMO_MODE is on. "
+        "It is rate limited, never binds a real account, and answers 404 "
+        "when the flag is off so the sign-in page uses Firebase."
+    ),
     "/api/v1/auth/firebase/session": (
         "exchanges a verified Firebase ID token for this product's cookies. "
         "The Firebase token IS the authentication."
@@ -579,6 +588,11 @@ _PUBLIC_BY_DESIGN: dict[str, str] = {
     # Company self-registration (owner spec 2026-09-29, section 5). The
     # person registering has no account, so no route here can ask for a
     # session. Each step is authorized by the proof the step before produced.
+    "/api/v1/company-onboarding/demo": (
+        "creates one public demo company when DEMO_MODE is on, with a "
+        "simulated registration charge and a real credit grant. It is rate "
+        "limited and answers 404 when the flag is off."
+    ),
     "/api/v1/company-onboarding/register": (
         "spends a single-use company_register CAPTCHA proof before anything "
         "else, then sends a security code (or, to an address that already has "

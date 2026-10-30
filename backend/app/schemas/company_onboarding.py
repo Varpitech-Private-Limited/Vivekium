@@ -20,6 +20,7 @@ __all__ = [
     "CodeVerifyIn",
     "OnboardingPurchaseIn",
     "OnboardingStateOut",
+    "DemoCompanyIn",
     "RegistrationAcceptedOut",
     "RegistrationIn",
 ]
@@ -81,6 +82,64 @@ class RegistrationIn(BaseModel):
         else:
             # A value typed and then abandoned by switching the dropdown back
             # is not the company's industry.
+            self.industry_other = None
+        return self
+
+
+class DemoCompanyIn(BaseModel):
+    """Public demo registration. No CAPTCHA. The password is not stored."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_name: str = Field(max_length=100)
+    last_name: str = Field(max_length=100)
+    email: EmailStr
+    phone: str = Field(max_length=32)
+    company_name: str = Field(max_length=255)
+    industry: Industry
+    industry_other: str | None = Field(default=None, max_length=100)
+    password: str = Field(min_length=1, max_length=256)
+
+    @field_validator("first_name")
+    @classmethod
+    def _first(cls, value: str) -> str:
+        return _trimmed(value, "First name")
+
+    @field_validator("last_name")
+    @classmethod
+    def _last(cls, value: str) -> str:
+        return _trimmed(value, "Last name")
+
+    @field_validator("company_name")
+    @classmethod
+    def _company(cls, value: str) -> str:
+        return _trimmed(value, "Company name")
+
+    @field_validator("email")
+    @classmethod
+    def _email(cls, value: str) -> str:
+        return company_onboarding.normal_email(str(value))
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, value: str) -> str:
+        return company_onboarding.canonical_phone(value)
+
+    @field_validator("password")
+    @classmethod
+    def _password(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Enter a password.")
+        return value
+
+    @model_validator(mode="after")
+    def _other_industry(self) -> "DemoCompanyIn":
+        other = " ".join((self.industry_other or "").split()) or None
+        if self.industry == "Other":
+            if other is None:
+                raise ValueError("Tell us your industry when you choose Other")
+            self.industry_other = other
+        else:
             self.industry_other = None
         return self
 

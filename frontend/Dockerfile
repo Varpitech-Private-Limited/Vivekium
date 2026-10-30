@@ -50,6 +50,14 @@ RUN if [ -z "$NEXT_PUBLIC_FIREBASE_API_KEY" ] || [ -z "$NEXT_PUBLIC_FIREBASE_PRO
       exit 1; \
     fi
 
+# Public demo UI. Default off. Next inlines NEXT_PUBLIC_ values at build
+# time, so a task environment variable cannot turn this on later. A public
+# demo image passes --build-arg NEXT_PUBLIC_DEMO_MODE=true. An empty value
+# is off. The backend still refuses every demo route unless DEMO_MODE and
+# DEMO_MODE_CONFIRM are set on the task.
+ARG NEXT_PUBLIC_DEMO_MODE=false
+ENV NEXT_PUBLIC_DEMO_MODE=$NEXT_PUBLIC_DEMO_MODE
+
 RUN npm run build
 
 FROM node:20-alpine AS runner
