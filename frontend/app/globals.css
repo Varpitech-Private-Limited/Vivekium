@@ -160,64 +160,68 @@
   }
 
   .dark {
-    /* DARK IS NAVY, NOT NEUTRAL GREY. The palette is navy-forward, so a
-       neutral near-black canvas would orphan the brand -- navy on grey reads
-       as a blue accent rather than as the product's colour. The canvas IS
-       navy-900 and the card is navy-700, which is why elevation in dark mode
-       is a LIGHTER SURFACE rather than a shadow (a shadow on near-black is
-       invisible, and making it visible produces a halo).
+    /* BLACK FIELD, WHITE TYPE, WHITE PRIMARY ACTIONS.
+       The page is #000000. Cards, menus and the sidebar sit one step up
+       (#0F0F0F to #171717) so a surface is still black and still separable.
+       Text is #FFFFFF, including descriptions. Grey is a border or a field
+       outline, never a word. Primary buttons are #FFFFFF with black labels.
+       The pressed state is a slightly dimmer white, set in the utilities
+       layer, because the button component hardcodes a white label.
+       Teal stays evidence. The code editor keeps a navy keyword and a teal
+       literal so syntax stays readable; those two tokens are not page chrome.
+       Light mode is unchanged. */
+    color-scheme: dark;
 
-       Both ramps invert: the dark theme uses the light end of each, because a
-       navy-600 button on a navy-900 canvas is a button nobody can find. */
-    --navy-50: 210 60% 12%;
-    --navy-100: 210 55% 18%;
-    --navy-200: 210 70% 72%; /* primary action in dark */
-    --navy-400: 210 90% 66%; /* link */
-    --navy-500: 210 80% 78%; /* hover on primary */
-    --navy-600: 210 70% 72%;
-    --navy-700: 210 73% 11%; /* #081B30  card surface */
-    --navy-900: 210 73% 5%; /* #030C16  canvas */
+    --navy-50: 0 0% 12%; /* #1F1F1F quiet fill, selected row */
+    --navy-100: 0 0% 18%; /* #2E2E2E selection and raised wash */
+    --navy-200: 0 0% 32%; /* #525252 structural border, not text */
+    --navy-400: 210 45% 74%; /* editor keywords; hue stays navy */
+    --navy-500: 210 30% 82%; /* editor numbers */
+    --navy-600: 0 0% 100%; /* #FFFFFF primary button */
+    --navy-700: 0 0% 100%; /* #FFFFFF so text-brand-700 stays white */
+    --navy-900: 0 0% 0%; /* #000000 */
 
     --teal-50: 175 55% 13%;
     --teal-100: 175 50% 18%;
     --teal-400: 175 84% 40%; /* the dark-theme accent */
     --teal-500: 175 70% 55%;
-    --teal-600: 175 70% 62%; /* teal TEXT in dark, on navy-700 */
+    --teal-600: 175 70% 62%; /* teal text on the black card */
     --teal-700: 175 70% 68%;
     --teal-900: 175 60% 88%;
 
     --ink: 0 0% 100%; /* #FFFFFF */
-    --surface: 210 73% 11%; /* #081B30  navy-700 */
-    --canvas: 210 73% 5%; /* #030C16  navy-900 */
-    --border-token: 210 60% 22%; /* #16385A */
+    --ink-soft: 0 0% 100%;
+    --muted-ink: 0 0% 100%;
+    --surface: 0 0% 6%; /* #0F0F0F cards and sidebar */
+    --canvas: 0 0% 0%; /* #000000 page */
+    --border-token: 0 0% 22%; /* #383838 */
 
-    /* Dark theme runs the affordance the other way: the field border is
-       LIGHTER than the navy surface it sits on. Same 3:1 bar, same script
-       checks it. */
-    --field-border: 210 45% 52%;
-    --field-border-hover: 210 70% 72%;
+    /* The field border is lighter than the black surface it sits on.
+       Same 3:1 bar, same script checks it. */
+    --field-border: 0 0% 58%;
+    --field-border-hover: 0 0% 100%;
 
     --background: var(--canvas);
     --foreground: var(--ink);
     --card: var(--surface);
     --card-foreground: var(--ink);
-    --popover: var(--surface);
+    --popover: 0 0% 9%; /* #171717 */
     --popover-foreground: var(--ink);
-    --primary: var(--navy-200);
-    --primary-foreground: 210 73% 8%;
-    --secondary: 210 50% 16%;
-    --secondary-foreground: var(--ink);
-    --muted: 210 50% 16%;
-    --muted-foreground: var(--ink);
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 100%;
     --accent: var(--teal-100);
-    --accent-foreground: var(--teal-900);
+    --accent-foreground: 0 0% 100%;
     --destructive: 357 90% 77%;
-    --destructive-foreground: 210 73% 8%;
+    --destructive-foreground: 0 0% 0%;
     --border: var(--border-token);
     --input: var(--field-border);
-    --ring: var(--navy-400);
+    --ring: 0 0% 100%;
     --warning: 40 82% 69%;
-    --warning-foreground: 210 73% 8%;
+    --warning-foreground: 0 0% 0%;
 
     /* The rating ramp keeps its hue in dark mode but swaps fg/bg roles so the
        chip stays legible on a near-black card. */
@@ -428,6 +432,31 @@
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+  }
+
+  /* One hue in the dark theme too. The light gradient walks the navy ramp;
+     that ramp is white here, except the editor keyword, so the phrase stays
+     white rather than picking up that blue. */
+  .dark .text-gradient-brand {
+    background-image: linear-gradient(100deg, #ffffff, #d4d4d4 55%, #ffffff);
+  }
+
+  /* Primary fills are white. `text-white` is hardcoded on those fills in the
+     button, the badge and the nav, which would vanish on a white control.
+     Black labels keep the control readable. Pressed fills step down to
+     #E6E6E6 without turning the label grey. */
+  .dark .bg-brand-600,
+  .dark .bg-navy-600,
+  .dark .bg-brand-700,
+  .dark .bg-navy-700,
+  .dark .bg-primary {
+    color: #000000;
+  }
+
+  .dark .bg-brand-600:hover,
+  .dark .bg-navy-600:hover,
+  .dark .bg-primary:hover {
+    background-color: #e6e6e6;
   }
 }
 

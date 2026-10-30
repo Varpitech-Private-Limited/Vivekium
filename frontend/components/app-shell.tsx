@@ -88,7 +88,7 @@ function NavLink({
         <span
           className={cn(
             "ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-chip font-semibold leading-none",
-            active ? "bg-white text-brand-700" : "bg-brand-600 text-white",
+            active ? "bg-white text-black dark:bg-black dark:text-white" : "bg-brand-600 text-white",
             // In the collapsed rail there is no label to sit beside, so the
             // count rides the icon rather than disappearing with the text.
             collapsed && "ml-0",

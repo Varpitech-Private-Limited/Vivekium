@@ -70,10 +70,9 @@ def test_all_auth_actions_registered() -> None:
         "logout",
         "email_send_failed",
         "owner_invariant_violation",
-        # Auth hardening, 2026-09-29 (auth spec section 29): a failed CAPTCHA
-        # answer, a security code sent for a password change or reset, the
-        # password changed, and an invitation accepted by setting a password.
-        "captcha_challenge_failed",
+        # Auth hardening, 2026-09-29 (auth spec section 29): a security code
+        # sent for a password change or reset, the password changed, and an
+        # invitation accepted by setting a password.
         "password_change_code_sent",
         "password_changed",
         "staff_invite_accepted",

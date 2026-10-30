@@ -17,6 +17,15 @@
         ],
         "createdAt": "2026-09-05T15:05:21.000Z",
         "reason": "Sanctioned exception already recorded in .impeccable-exceptions.md line 19: the semantic left rule marks the candidate's own unrated verbatim words in the Validation section; pre-existing design, not introduced by this change"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "frontend/components/posting-window.tsx"
+        ],
+        "createdAt": "2026-10-30T11:27:57.894Z",
+        "reason": "Sanctioned exception in .impeccable-exceptions.md: the left border colour is the posting state (live, grace, or closed) and the same state is written in words beside it."
       }
     ]
   }

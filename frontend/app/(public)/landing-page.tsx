@@ -139,7 +139,7 @@ export function LandingPage() {
                   meeting that starts from zero.
                 </p>
               </article>
-              <article className="border border-ink bg-ink p-7 text-white">
+              <article className="border border-navy-900 bg-navy-900 p-7 text-white">
                 <p className="type-eyebrow text-white/70">
                   What you walk in with
                 </p>
@@ -248,7 +248,7 @@ export function LandingPage() {
           </div>
         </section>
 
-        <section className="bg-ink px-6 py-20 text-center text-white lg:px-10 lg:py-24">
+        <section className="bg-navy-900 px-6 py-20 text-center text-white lg:px-10 lg:py-24">
           <div className="mx-auto flex max-w-3xl flex-col items-center">
             <h2 className="type-section-title text-white">
               Run one role. Read the briefs.
@@ -257,7 +257,7 @@ export function LandingPage() {
               Thirty minutes. A job you are already hiring for. You leave
               knowing if this belongs in your stack.
             </p>
-            <Button asChild size="lg" variant="outline" className="mt-8 border-white bg-white text-ink hover:bg-canvas">
+            <Button asChild size="lg" variant="outline" className="mt-8 border-white bg-white text-black hover:border-white hover:bg-white/90 hover:text-black">
               <a href={REQUEST_ACCESS_HREF}>Request demo</a>
             </Button>
           </div>

@@ -548,21 +548,10 @@ _PUBLIC_BY_DESIGN: dict[str, str] = {
         "exchanges a verified Firebase ID token for this product's cookies. "
         "The Firebase token IS the authentication."
     ),
-    "/api/v1/auth/captcha/challenge": (
-        "draws a CAPTCHA challenge for a sign-in, registration or password "
-        "surface. It is answered before anybody has a session, so it cannot "
-        "require one; it writes one short-lived Redis row holding only an "
-        "HMAC of the answer, and it is rate limited."
-    ),
-    "/api/v1/auth/captcha/verify": (
-        "judges a CAPTCHA answer and returns a single-use proof bound to one "
-        "purpose. Anonymous for the same reason as the challenge; three wrong "
-        "answers spend the challenge and every failure is audited."
-    ),
     "/api/v1/auth/password-reset/request": (
-        "starts a forgotten-password reset for somebody who by definition "
-        "cannot sign in. It spends a single-use CAPTCHA proof first and "
-        "answers the same sentence whether or not the address has an account."
+        "starts a forgotten-password reset for somebody who cannot sign in. "
+        "It is rate limited and answers the same sentence whether or not the "
+        "address has an account."
     ),
     "/api/v1/auth/password-reset/verify": (
         "exchanges the six-digit security code that went to the mailbox for "
@@ -577,9 +566,8 @@ _PUBLIC_BY_DESIGN: dict[str, str] = {
     "/api/v1/companies/invites/{token}/setup-password": (
         "creates the invited person's password sign-in for EXACTLY the "
         "invited email, then opens their company session. The invite token "
-        "names one pending invitation and a single-use CAPTCHA proof is spent "
-        "first; the person has no account yet, so a session cannot be asked "
-        "for."
+        "names one pending invitation. The person has no account yet, so a "
+        "session cannot be asked for. The route is rate limited."
     ),
     "/api/v2/companies/invites/{token}/setup-password": (
         "the same handler under the v2 prefix, where the companies router is "
@@ -587,16 +575,16 @@ _PUBLIC_BY_DESIGN: dict[str, str] = {
     ),
     # Company self-registration (owner spec 2026-09-29, section 5). The
     # person registering has no account, so no route here can ask for a
-    # session. Each step is authorized by the proof the step before produced.
+    # session. Later steps are authorized by the security code or the
+    # onboarding cookie that code mints.
     "/api/v1/company-onboarding/demo": (
         "creates one public demo company when DEMO_MODE is on, with a "
         "simulated registration charge and a real credit grant. It is rate "
         "limited and answers 404 when the flag is off."
     ),
     "/api/v1/company-onboarding/register": (
-        "spends a single-use company_register CAPTCHA proof before anything "
-        "else, then sends a security code (or, to an address that already has "
-        "an account, a notice) and answers the same sentence either way. "
+        "sends a security code (or, to an address that already has an "
+        "account, a notice) and answers the same sentence either way. "
         "Rate limited."
     ),
     "/api/v1/company-onboarding/code/resend": (

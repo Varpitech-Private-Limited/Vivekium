@@ -52,35 +52,30 @@ async function open(initialEmail = "person@example.com") {
     </form>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }));
-  await screen.findByAltText(/security check characters/i);
+  await screen.findByLabelText("Email address");
+  expect(screen.queryByLabelText("Security check")).toBeNull();
   return outerSubmit;
 }
 
 describe("ForgotPassword", () => {
-  it("asks the server, with a security check, and shows its one sentence", async () => {
+  it("asks the server and shows its one sentence", async () => {
     serve({
-      "/auth/captcha/challenge": () => CHALLENGE,
-      "/auth/captcha/verify": () => ({ captcha_proof: "proof-1" }),
       "/auth/password-reset/request": () => ({ sent: true, message: RESET_SENT_MESSAGE }),
     });
     const outerSubmit = await open();
     const field = screen.getByLabelText("Email address") as HTMLInputElement;
     expect(field.value).toBe("person@example.com");
-    fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "ab3d5f" } });
     fireEvent.keyDown(field, { key: "Enter" });
 
     expect(await screen.findByText(RESET_SENT_MESSAGE)).toBeTruthy();
     expect(outerSubmit).not.toHaveBeenCalled();
-    expect(posted("/auth/captcha/verify")).toEqual([
-      { challenge_id: "c1", answer: "ab3d5f", purpose: "password_reset" },
-    ]);
     expect(posted("/auth/password-reset/request")).toEqual([
-      { email: "person@example.com", captcha_proof: "proof-1" },
+      { email: "person@example.com" },
     ]);
   });
 
   it("never sends a malformed address", async () => {
-    serve({ "/auth/captcha/challenge": () => CHALLENGE });
+    serve({});
     await open("not-an-address");
     fireEvent.click(screen.getByRole("button", { name: "Email me a security code" }));
     expect(await screen.findByText(/enter the email address you sign in with/i)).toBeTruthy();
@@ -89,8 +84,6 @@ describe("ForgotPassword", () => {
 
   it("walks the code and the new password through to the server", async () => {
     serve({
-      "/auth/captcha/challenge": () => CHALLENGE,
-      "/auth/captcha/verify": () => ({ captcha_proof: "proof-2" }),
       "/auth/password-reset/request": () => ({ sent: true, message: RESET_SENT_MESSAGE }),
       "/auth/password-reset/verify": () => ({ reset_token: "ticket-1" }),
       "/auth/password-reset/complete": () => ({
@@ -99,7 +92,6 @@ describe("ForgotPassword", () => {
       }),
     });
     await open();
-    fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "ab3d5f" } });
     fireEvent.click(screen.getByRole("button", { name: "Email me a security code" }));
 
     const codeField = await screen.findByLabelText("Security code");
@@ -126,15 +118,12 @@ describe("ForgotPassword", () => {
   it("says the server's refusal of a wrong code", async () => {
     const { ApiError } = await import("@/lib/api");
     serve({
-      "/auth/captcha/challenge": () => CHALLENGE,
-      "/auth/captcha/verify": () => ({ captcha_proof: "proof-3" }),
       "/auth/password-reset/request": () => ({ sent: true, message: RESET_SENT_MESSAGE }),
       "/auth/password-reset/verify": () => {
         throw new ApiError(400, { detail: "That security code is not valid or has expired." });
       },
     });
     await open();
-    fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "ab3d5f" } });
     fireEvent.click(screen.getByRole("button", { name: "Email me a security code" }));
     fireEvent.change(await screen.findByLabelText("Security code"), { target: { value: "111111" } });
     fireEvent.click(screen.getByRole("button", { name: "Verify code" }));

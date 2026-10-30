@@ -100,7 +100,7 @@ export default function AboutPage() {
 
       <section className="mx-auto max-w-6xl px-6 py-20 lg:px-10 lg:py-28">
         <div className="grid items-center gap-10 lg:grid-cols-[.85fr_1.15fr]">
-          <FadeIn className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-[#090b16] text-white shadow-pop">
+          <FadeIn className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-black text-white shadow-pop">
             <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_70%_10%,hsl(var(--teal-600)/.38),transparent_45%)]" />
             <div className="absolute inset-0 grid place-items-center">
               <span className="grid h-36 w-36 place-items-center rounded-full border border-white/15 bg-white/[.06] text-7xl font-black text-teal-400">M</span>

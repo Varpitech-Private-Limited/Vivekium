@@ -65,7 +65,9 @@ class MeOut(BaseModel):
     capabilities: list[str] = []
 
 
-#: The CAPTCHA purposes (services/captcha.PURPOSES), spelled for the schema.
+#: Sign-in surfaces. The session exchange reads `captcha_purpose` as the portal
+#: filter (A-24, 2026-10-30). The wire name is unchanged so a page that still
+#: sends it keeps working. It is not a challenge, and nothing checks a proof.
 CaptchaPurpose = Literal[
     "candidate_login",
     "candidate_register",
@@ -90,8 +92,6 @@ ExchangePurpose = Literal[
     "provider_login",
     "bd_login",
 ]
-
-_PROOF = Field(min_length=16, max_length=128)
 
 
 class DemoSessionIn(BaseModel):
@@ -121,43 +121,19 @@ class DemoStatusOut(BaseModel):
 
 
 class FirebaseSessionIn(BaseModel):
-    """A verified Firebase identity plus a CAPTCHA proof for its surface.
+    """A verified Firebase identity for one sign-in surface.
 
-    The proof is REQUIRED (auth spec 6.4): the application session is the
-    boundary, so a caller who skips the sign-in page and posts a Firebase
-    token directly still has to pass the check. The portal field is gone:
-    the purpose IS the portal intent now, and it is a filter over the
-    database's own roles, never a grant.
+    The surface (`captcha_purpose`) is the portal filter: a filter over the
+    database's own roles, never a grant. `captcha_proof` is accepted and not
+    read, so a page that still sends one is not refused (A-24). Nothing on
+    this body is a challenge.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id_token: str = Field(min_length=20)
-    captcha_proof: str = _PROOF
     captcha_purpose: ExchangePurpose
-
-
-class CaptchaChallengeIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    purpose: CaptchaPurpose
-
-
-class CaptchaChallengeOut(BaseModel):
-    challenge_id: str
-    #: `data:image/svg+xml;base64,...`, drawn on the server. Carries no text.
-    image: str
-    expires_in: int
-
-
-class CaptchaVerifyIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    challenge_id: str = Field(min_length=1, max_length=64)
-    answer: str = Field(min_length=1, max_length=32)
-    purpose: CaptchaPurpose
-
-
-class CaptchaVerifyOut(BaseModel):
-    captcha_proof: str
+    captcha_proof: str | None = Field(default=None, max_length=128)
 
 
 class SecurityCodeSentOut(BaseModel):
@@ -169,7 +145,8 @@ class SecurityCodeSentOut(BaseModel):
 class PasswordResetRequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(min_length=3, max_length=320)
-    captcha_proof: str = _PROOF
+    #: Accepted and not read (A-24). An older page may still send it.
+    captcha_proof: str | None = Field(default=None, max_length=128)
 
 
 class PasswordResetVerifyIn(BaseModel):
@@ -190,7 +167,8 @@ class PasswordResetCompleteIn(BaseModel):
 
 class PasswordChangeRequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    captcha_proof: str = _PROOF
+    #: Accepted and not read (A-24). An older page may still send it.
+    captcha_proof: str | None = Field(default=None, max_length=128)
 
 
 class PasswordChangeVerifyIn(BaseModel):
@@ -214,7 +192,8 @@ class InviteSetupPasswordIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     password: str = Field(min_length=1, max_length=256)
-    captcha_proof: str = _PROOF
+    #: Accepted and not read (A-24). An older page may still send it.
+    captcha_proof: str | None = Field(default=None, max_length=128)
     full_name: str | None = Field(default=None, max_length=200)
 
 

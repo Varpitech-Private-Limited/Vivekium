@@ -19,12 +19,6 @@ import {
 } from "@/lib/firebase-session";
 import { useAuth } from "@/lib/auth-context";
 import { ForgotPassword } from "@/components/forgot-password";
-import {
-  CAPTCHA_EMPTY_MESSAGE,
-  Captcha,
-  CaptchaError,
-  type CaptchaHandle,
-} from "@/components/captcha";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,9 +44,8 @@ export function ApplyAuth({ onAuthed }: { onAuthed: () => void }) {
   const rules = passwordRules(password);
   const passwordValid = Object.values(rules).every(Boolean);
   const [resetOpen, setResetOpen] = React.useState(false);
-  const captcha = React.useRef<CaptchaHandle>(null);
-  // The security check names the surface: signing in is a candidate sign-in,
-  // creating an account a candidate registration.
+  // The surface is the portal: signing in is a candidate sign-in, creating
+  // an account a candidate registration.
   const purpose = mode === "register" ? "candidate_register" : "candidate_login";
 
   const handleExchange = React.useCallback(
@@ -92,7 +85,6 @@ export function ApplyAuth({ onAuthed }: { onAuthed: () => void }) {
       .catch((authError) => {
         const direct =
           authError instanceof Error &&
-          !(authError instanceof CaptchaError) &&
           authError.message.startsWith("That account")
             ? authError.message
             : friendlyAuthError(authError);
@@ -102,20 +94,14 @@ export function ApplyAuth({ onAuthed }: { onAuthed: () => void }) {
   };
 
   const google = () => {
-    // The popup must open on the click itself, so the check is asked for
-    // before it and verified after it.
-    if (!captcha.current?.hasAnswer()) {
-      setError(CAPTCHA_EMPTY_MESSAGE);
-      return;
-    }
+    // The popup must open on the click itself or the browser blocks it.
     run(async () => {
       const credential = await signInWithPopup(
         firebaseAuth,
         createCandidateGoogleProvider()
       );
-      const proof = await captcha.current!.prove();
       await handleExchange(
-        await exchangeFirebaseSession(credential.user, { proof, purpose })
+        await exchangeFirebaseSession(credential.user, purpose)
       );
     });
   };
@@ -133,8 +119,6 @@ export function ApplyAuth({ onAuthed }: { onAuthed: () => void }) {
       return;
     }
     run(async () => {
-      // The security check first: a wrong answer costs no Firebase sign-in.
-      const proof = await captcha.current!.prove();
       const credential =
         mode === "register"
           ? await createUserWithEmailAndPassword(
@@ -151,7 +135,7 @@ export function ApplyAuth({ onAuthed }: { onAuthed: () => void }) {
         await updateProfile(credential.user, { displayName: name.trim() });
       }
       await handleExchange(
-        await exchangeFirebaseSession(credential.user, { proof, purpose })
+        await exchangeFirebaseSession(credential.user, purpose)
       );
     });
   };
@@ -255,13 +239,6 @@ export function ApplyAuth({ onAuthed }: { onAuthed: () => void }) {
             </ul>
           ) : null}
         </div>
-        <Captcha
-          key={purpose}
-          ref={captcha}
-          purpose={purpose}
-          disabled={busy}
-          idPrefix="apply-captcha"
-        />
         <Button
           className="w-full"
           disabled={busy || (mode === "register" && !passwordValid)}

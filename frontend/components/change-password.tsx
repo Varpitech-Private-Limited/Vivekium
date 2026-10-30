@@ -21,7 +21,6 @@ import { apiPost } from "@/lib/api";
 import { firebaseAuth } from "@/lib/firebase";
 import { friendlyAuthError } from "@/lib/firebase-session";
 import { useAuth } from "@/lib/auth-context";
-import { Captcha, type CaptchaHandle } from "@/components/captcha";
 import {
   PasswordRules,
   isPasswordValid,
@@ -101,7 +100,6 @@ export function ChangePasswordCard() {
   const [notice, setNotice] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const captcha = React.useRef<CaptchaHandle>(null);
 
   if (!user?.password_enabled) return null;
 
@@ -120,10 +118,7 @@ export function ChangePasswordCard() {
   const sendCode = (event: React.FormEvent) => {
     event.preventDefault();
     run(async () => {
-      const proof = await captcha.current!.prove();
-      const sent = await apiPost<{ message: string }>("/auth/password-change/request", {
-        captcha_proof: proof,
-      });
+      const sent = await apiPost<{ message: string }>("/auth/password-change/request", {});
       setNotice(sent.message);
       setCode("");
       setStep("code");
@@ -195,7 +190,6 @@ export function ChangePasswordCard() {
 
         {step === "start" ? (
           <form className="space-y-4" onSubmit={sendCode} noValidate>
-            <Captcha ref={captcha} purpose="password_change" disabled={saving} idPrefix="password-change-captcha" />
             <Button type="submit" disabled={saving}>
               {saving ? "Sending" : "Email me a security code"}
             </Button>

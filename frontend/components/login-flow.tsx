@@ -22,11 +22,6 @@ import { currentNextPath, withNext } from "@/lib/next-destination";
 import type { AuthContextsResponse, AuthSession } from "@/lib/types";
 import { apiErrorMessage } from "@/lib/validation-errors";
 import { AuthDivider, AuthLink, AuthShell } from "@/components/auth-shell";
-import {
-  CAPTCHA_EMPTY_MESSAGE,
-  Captcha,
-  type CaptchaHandle,
-} from "@/components/captcha";
 import { InlineError } from "@/components/page-primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,8 +30,7 @@ import { GoogleMark } from "@/components/google-mark";
 import { ForgotPassword } from "@/components/forgot-password";
 
 /**
- * Which sign-in page this is. The surface decides the security check's
- * purpose, and the server reads that purpose as the portal: a candidate page
+ * Which sign-in page this is. The surface is the portal: a candidate page
  * opens the candidate workspace, the company page a company workspace, and the
  * Provider and business development pages their consoles.
  *
@@ -110,7 +104,6 @@ export function LoginFlow({
   const [resetOpen, setResetOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const captcha = React.useRef<CaptchaHandle>(null);
 
   const finish = React.useCallback(
     (session: AuthSession) => {
@@ -181,38 +174,29 @@ export function LoginFlow({
           if (!fallThrough) throw failure;
         }
       }
-      // The security check first: a wrong answer costs no Firebase sign-in.
-      const proof = await captcha.current!.prove();
       const credential = await signInWithEmailAndPassword(
         firebaseAuth,
         email.trim(),
         password
       );
-      resolve(await exchangeFirebaseSession(credential.user, { proof, purpose }));
+      resolve(await exchangeFirebaseSession(credential.user, purpose));
     });
   };
 
   const googleSignIn = () => {
-    // The popup must open on the click itself or the browser blocks it, so
-    // the check is asked for BEFORE the popup and verified after it.
-    if (!captcha.current?.hasAnswer()) {
-      setError(CAPTCHA_EMPTY_MESSAGE);
-      return;
-    }
+    // The popup must open on the click itself or the browser blocks it.
     run(async () => {
       const credential = await signInWithPopup(
         firebaseAuth,
         createCandidateGoogleProvider()
       );
-      const proof = await captcha.current!.prove();
-      resolve(await exchangeFirebaseSession(credential.user, { proof, purpose }));
+      resolve(await exchangeFirebaseSession(credential.user, purpose));
     });
   };
 
   /**
    * Finalize the workspace choice. A `context_token` is single use and short
-   * lived; once it is spent or expired the person signs in again, which asks
-   * a fresh security check, rather than this screen re-minting one quietly.
+   * lived; once it is spent or expired the person signs in again.
    */
   const chooseContext = (userId: string) =>
     run(async () => {
@@ -362,12 +346,6 @@ export function LoginFlow({
                     </button>
                   </div>
                 </div>
-                <Captcha
-                  ref={captcha}
-                  purpose={purpose}
-                  disabled={busy}
-                  idPrefix="login-captcha"
-                />
                 <Button size="lg" className="w-full" disabled={busy}>
                   {busy ? (
                     <>

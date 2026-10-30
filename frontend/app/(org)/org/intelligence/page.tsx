@@ -77,7 +77,7 @@ function AlertsPanel() {
       ) : alerts === null ? (
         <p className="text-sm">Checking thresholds...</p>
       ) : alerts.length === 0 ? (
-        <p className="rounded-lg border border-navy-200 p-3 text-sm dark:border-navy-700">
+        <p className="rounded-lg border border-border p-3 text-sm">
           No thresholds are breaching right now.
         </p>
       ) : (
@@ -102,12 +102,12 @@ function DashboardCard({ dash }: { dash: IntelligenceDashboardSummary }) {
   return (
     <Link
       href={`/org/intelligence/${dash.key}`}
-      className="group flex flex-col rounded-xl border border-navy-200 bg-white p-4 transition-colors hover:border-teal-600 dark:border-navy-700 dark:bg-navy-950"
+      className="group flex flex-col rounded-xl border border-border bg-card p-4 transition-colors hover:border-teal-600"
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold leading-snug">{dash.title}</h3>
         <ArrowRight
-          className="mt-0.5 h-4 w-4 shrink-0 text-navy-600 transition-transform group-hover:translate-x-0.5 dark:text-navy-300"
+          className="mt-0.5 h-4 w-4 shrink-0 text-navy-600 transition-transform group-hover:translate-x-0.5"
           aria-hidden="true"
         />
       </div>

@@ -25,7 +25,7 @@ const STATUS_STYLES: Record<PostingStatus, string> = {
   scheduled: "border-border",
   // A deliberate ending reads as the navy structural colour rather than as a
   // warning: the requirement was met, which is the good outcome.
-  closed: "border-navy-600 text-navy-900 dark:text-navy-100",
+  closed: "border-navy-600 text-navy-900 dark:text-white",
 };
 
 function formatDate(value?: string | null): string {

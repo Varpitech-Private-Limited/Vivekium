@@ -33,10 +33,9 @@ from app.schemas.auth import (
     PasswordResetRequestIn,
     PasswordResetVerifyIn,
 )
-from app.services import auth_sessions, captcha, firebase_auth, security_codes
+from app.services import auth_sessions, firebase_auth, security_codes
 from app.workers import dispatch
 from tests.candidate_session import close_candidate_session, create_candidate_session, open_session
-from tests.captcha_support import captcha_proof
 
 
 NEW_PASSWORD = "Fresh-Pass-2026"
@@ -106,21 +105,14 @@ async def _audits(factory, action: str, user_id) -> list[AuditLog]:
 # -- reset ----------------------------------------------------------------------
 
 
-async def test_reset_asks_for_the_captcha_first(world) -> None:
+async def test_reset_sends_the_code_without_a_proof(world) -> None:
     factory, person, _uid, _fb = world
     async with factory() as session, superadmin_scope(session):
-        with pytest.raises(captcha.CaptchaRequired):
-            await auth.password_reset_request(
-                PasswordResetRequestIn(email=person.email, captcha_proof="p" * 40), session
-            )
-        # A proof for another surface is not a password-reset proof.
-        with pytest.raises(captcha.CaptchaRequired):
-            await auth.password_reset_request(
-                PasswordResetRequestIn(
-                    email=person.email, captcha_proof=await captcha_proof("candidate_login")
-                ),
-                session,
-            )
+        sent = await auth.password_reset_request(
+            PasswordResetRequestIn(email=person.email), session
+        )
+    assert sent.message == auth.RESET_SENT_MESSAGE
+    assert _sent_code(person.email.lower())
 
 
 async def test_reset_answers_the_same_for_an_unknown_address(world) -> None:
@@ -128,12 +120,12 @@ async def test_reset_answers_the_same_for_an_unknown_address(world) -> None:
     stranger = f"nobody-{uuid.uuid4().hex}@reset.test"
     async with factory() as session, superadmin_scope(session):
         unknown = await auth.password_reset_request(
-            PasswordResetRequestIn(email=stranger, captcha_proof=await captcha_proof("password_reset")),
+            PasswordResetRequestIn(email=stranger),
             session,
         )
     async with factory() as session, superadmin_scope(session):
         known = await auth.password_reset_request(
-            PasswordResetRequestIn(email=person.email, captcha_proof=await captcha_proof("password_reset")),
+            PasswordResetRequestIn(email=person.email),
             session,
         )
     assert unknown == known
@@ -146,7 +138,7 @@ async def test_reset_answers_the_same_for_an_unknown_address(world) -> None:
         with pytest.raises(security_codes.CodeCooldown):
             await auth.password_reset_request(
                 PasswordResetRequestIn(
-                    email=stranger, captcha_proof=await captcha_proof("password_reset")
+                    email=stranger
                 ),
                 session,
             )
@@ -156,7 +148,7 @@ async def test_reset_end_to_end_revokes_every_session(world) -> None:
     factory, person, uid, firebase = world
     async with factory() as session, superadmin_scope(session):
         await auth.password_reset_request(
-            PasswordResetRequestIn(email=person.email, captcha_proof=await captcha_proof("password_reset")),
+            PasswordResetRequestIn(email=person.email),
             session,
         )
     code = _sent_code(person.email.lower())
@@ -207,7 +199,7 @@ async def test_an_expired_reset_code_is_refused(world) -> None:
     factory, person, _uid, _fb = world
     async with factory() as session, superadmin_scope(session):
         await auth.password_reset_request(
-            PasswordResetRequestIn(email=person.email, captcha_proof=await captcha_proof("password_reset")),
+            PasswordResetRequestIn(email=person.email),
             session,
         )
     code = _sent_code(person.email.lower())
@@ -235,17 +227,11 @@ def _cookie(response: Response, name: str) -> str | None:
     return None
 
 
-async def test_change_needs_the_captcha_and_the_code(world) -> None:
+async def test_change_sends_the_code_without_a_proof(world) -> None:
     factory, person, _uid, _fb = world
     async with factory() as session, superadmin_scope(session):
-        with pytest.raises(captcha.CaptchaRequired):
-            await auth.password_change_request(
-                PasswordChangeRequestIn(captcha_proof=await captcha_proof("password_reset")),
-                _current(person), session,
-            )
-    async with factory() as session, superadmin_scope(session):
         sent = await auth.password_change_request(
-            PasswordChangeRequestIn(captcha_proof=await captcha_proof("password_change")),
+            PasswordChangeRequestIn(),
             _current(person), session,
         )
     assert "security code" in sent.message and person.email not in sent.message
@@ -274,7 +260,7 @@ async def test_change_revokes_other_sessions_and_reissues_this_one(world) -> Non
 
     async with factory() as session, superadmin_scope(session):
         await auth.password_change_request(
-            PasswordChangeRequestIn(captcha_proof=await captcha_proof("password_change")),
+            PasswordChangeRequestIn(),
             _current(person), session,
         )
     code = _sent_code(person.email)

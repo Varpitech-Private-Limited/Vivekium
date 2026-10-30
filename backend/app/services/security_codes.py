@@ -28,7 +28,7 @@ for only after `SECURITY_CODE_RESEND_SECONDS` (60). A new code REPLACES the
 previous one, so "which of the two codes counts" never has two answers. Every
 attempt is COUNTED BEFORE the comparison. A right code is consumed.
 
-FAILS CLOSED, like `services/captcha`: a Redis that cannot answer raises
+FAILS CLOSED: a Redis that cannot answer raises
 `SecurityCodesUnavailable` (503), never a verdict.
 """
 from __future__ import annotations

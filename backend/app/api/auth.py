@@ -43,10 +43,6 @@ from app.models.enums import Role, UserStatus
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.auth import (
-    CaptchaChallengeIn,
-    CaptchaChallengeOut,
-    CaptchaVerifyIn,
-    CaptchaVerifyOut,
     ContextOut,
     DemoSessionIn,
     DemoStatusOut,
@@ -69,13 +65,12 @@ from app.schemas.auth import (
 from app.services import auth_sessions, candidate_identity, login_context
 from app.services import company_onboarding
 from app.services import demo_access
-from app.services import captcha, password_policy, security_codes, security_email
+from app.services import password_policy, security_codes, security_email
 from app.services import firebase_auth
 from app.services import rbac
 from app.services import staff_invites
 from app.services.rate_limit import rate_limit
 from app.services.audit import (
-    AUTH_CAPTCHA_CHALLENGE_FAILED,
     AUTH_CONTEXT_SELECTED,
     AUTH_LOGIN_REFUSED,
     AUTH_LOGIN_SUCCEEDED,
@@ -86,9 +81,9 @@ from app.services.audit import (
 
 router = APIRouter()
 
-#: Which portal a session exchange may land in, by the CAPTCHA purpose of the
-#: surface it came from (auth spec 6.5 and 7). The purpose is the portal
-#: intent: a filter over the database's own roles, never a grant, so a person
+#: Which portal a session exchange may land in, by the sign-in surface
+#: (`captcha_purpose`). The surface is the portal intent: a filter over the
+#: database's own roles, never a grant, so a person
 #: with a candidate profile and a company seat gets the candidate workspace on
 #: the candidate sign-in page and the company one on /company/login.
 EXCHANGE_PURPOSE_PORTAL: dict[str, str] = {
@@ -295,18 +290,15 @@ async def firebase_session(
       may claim the oldest unlinked sourced record; an unverified one never
       does), candidate cookies.
 
-    A CAPTCHA PROOF IS SPENT FIRST (auth spec 6.4), before the token is
-    verified: the application session is the boundary, so a caller who went
-    to Firebase directly still has to pass the check here. The proof's
-    purpose names the surface, and the surface narrows the workspaces this
-    identity may enter (`EXCHANGE_PURPOSE_PORTAL`).
+    The surface (`captcha_purpose`) narrows the workspaces this identity may
+    enter (`EXCHANGE_PURPOSE_PORTAL`). It is not a challenge. A-24 removed
+    the server-drawn check; a proof on the body is not read.
 
     The provider is ROLE AWARE (`firebase_auth.assert_provider_allowed`): a
     candidate may use Google or a password, every company role a password
     only, and the Provider and BD keep their policy. Phone sign-in is removed.
     Every failure is a clean 400/401/403/409/422/503, never a 500.
     """
-    await captcha.consume_proof(body.captcha_proof, body.captcha_purpose)
     portal = EXCHANGE_PURPOSE_PORTAL[body.captcha_purpose]
     settings = get_settings()
     # `firebase_admin`'s client is SYNCHRONOUS and `check_revoked=True`
@@ -852,65 +844,16 @@ async def logout(request: Request, response: Response) -> dict:
     return {"logged_out": True}
 
 
-# ── CAPTCHA (auth spec section 6) ────────────────────────────────────────────
-#
-# Anonymous by necessity: a CAPTCHA is answered before anybody has a session.
-# Rate limited as abuse control; the limiter fails OPEN, so it is never what
-# protects a secret -- the challenge's own attempt count and single use are.
-
-
-@router.post(
-    "/captcha/challenge",
-    response_model=CaptchaChallengeOut,
-    dependencies=[Depends(rate_limit("captcha_challenge", limit=30, window=60))],
-)
-async def captcha_challenge(body: CaptchaChallengeIn) -> CaptchaChallengeOut:
-    """A fresh server-drawn challenge for one surface."""
-    challenge = await captcha.create_challenge(body.purpose)
-    return CaptchaChallengeOut(
-        challenge_id=challenge.challenge_id,
-        image=challenge.image,
-        expires_in=challenge.expires_in,
-    )
-
-
-@router.post(
-    "/captcha/verify",
-    response_model=CaptchaVerifyOut,
-    dependencies=[Depends(rate_limit("captcha_verify", limit=30, window=60))],
-)
-async def captcha_verify(
-    body: CaptchaVerifyIn,
-    session: AsyncSession = Depends(get_identity_session),
-) -> CaptchaVerifyOut:
-    """Judge an answer; a right one is exchanged for a single-use proof.
-
-    A wrong answer is recorded (`captcha_challenge_failed`, the purpose and a
-    reason word, never the answer) and committed BEFORE the refusal is raised,
-    because the refusal is the whole point of the row.
-    """
-    try:
-        proof = await captcha.verify_answer(body.challenge_id, body.answer, body.purpose)
-    except captcha.CaptchaIncorrect as exc:
-        await record_auth_event(
-            session,
-            action=AUTH_CAPTCHA_CHALLENGE_FAILED,
-            metadata={"purpose": body.purpose, "reason": exc.reason},
-        )
-        await session.commit()
-        raise
-    return CaptchaVerifyOut(captcha_proof=proof)
-
-
 # ── Password reset and change (auth spec section 9) ─────────────────────────
 #
 # THE SERVER CHANGES THE PASSWORD NOW. Firebase's own reset email and the
-# browser-side password update are retired: the reset went around the CAPTCHA
-# and the security code entirely, and the change needed a separate call, on a
-# fresh Firebase token, to revoke sessions, which a browser could simply not
-# make. `tests/test_auth_hardening_removed.py` keeps both gone. Both flows are three steps: a CAPTCHA and a security code sent to
-# the account's email, the code exchanged for a single-use ticket, and the
-# ticket exchanged for the new password. Firebase still stores the credential.
+# browser-side password update are retired: the reset went around the security
+# code entirely, and the change needed a separate call, on a fresh Firebase
+# token, to revoke sessions, which a browser could simply not make.
+# `tests/test_auth_hardening_removed.py` keeps both gone. Both flows are two
+# steps after A-24: a security code sent to the account's email, exchanged
+# for a single-use ticket, and the ticket exchanged for the new password.
+# Firebase still stores the credential. Rate limits stay.
 
 RESET_SENT_MESSAGE = (
     "If an account uses this address, we have sent a security code to it. "
@@ -991,7 +934,6 @@ async def password_reset_request(
     tell a registered address from an unregistered one. Only an address with a
     live account AND a Firebase identity is actually written to.
     """
-    await captcha.consume_proof(body.captcha_proof, "password_reset")
     email = _normal_email(body.email)
     code = await security_codes.issue_code("password_reset", email)
     accounts = await _accounts_for_email(session, email)
@@ -1073,7 +1015,6 @@ async def password_change_request(
     session: AsyncSession = Depends(get_identity_session),
 ) -> SecurityCodeSentOut:
     """Send a security code to the signed-in account's own email address."""
-    await captcha.consume_proof(body.captcha_proof, "password_change")
     user = await session.get(User, current.user_id)
     if user is None or user.status == UserStatus.disabled:
         raise HTTPException(status_code=401, detail="Account unavailable")

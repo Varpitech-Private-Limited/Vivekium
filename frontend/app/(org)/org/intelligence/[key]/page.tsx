@@ -41,7 +41,7 @@ const HEALTH_CHIP: Record<IntelligenceHealth, { label: string; tone: string }> =
   no_data: {
     label: "No data",
     tone:
-      "border-navy-300 bg-navy-50 text-navy-950 dark:border-navy-600 dark:bg-navy-900 dark:text-navy-50",
+      "border-border bg-muted text-foreground",
   },
 };
 
@@ -57,7 +57,7 @@ function formatValue(metric: IntelligenceMetric): string {
 function MetricCard({ metric }: { metric: IntelligenceMetric }) {
   const chip = HEALTH_CHIP[metric.status];
   return (
-    <article className="flex flex-col rounded-xl border border-navy-200 bg-white p-4 dark:border-navy-700 dark:bg-navy-950">
+    <article className="flex flex-col rounded-xl border border-border bg-card p-4">
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-sm font-semibold leading-snug">{metric.title}</h3>
         <span
@@ -123,7 +123,7 @@ export default function IntelligenceDashboardPage() {
     <div>
       <Link
         href="/org/intelligence"
-        className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-navy-700 hover:text-teal-700 dark:text-navy-200 dark:hover:text-teal-300"
+        className="mb-4 inline-flex items-center gap-1 text-sm font-medium text-foreground hover:text-teal-700 dark:hover:text-teal-300"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         All dashboards

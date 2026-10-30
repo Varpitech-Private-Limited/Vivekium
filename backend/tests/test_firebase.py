@@ -33,7 +33,7 @@ from app.services import firebase_auth
 from app.services.login_context import decode_context_token
 from app.services.firebase_auth import FirebaseIdentity, assert_provider_allowed
 from fastapi import HTTPException, Response
-from tests.captcha_support import captcha_proof
+
 
 
 # ── DB-free: provider gate (Google = candidates only) ────────────────────────
@@ -129,13 +129,12 @@ def _cookie_names(response: Response) -> list[str]:
 async def _call(
     session, identity, monkeypatch, purpose: str = "candidate_login"
 ) -> tuple[Response, object]:
-    """The route as a browser reaches it: a REAL CAPTCHA proof for the
-    surface (`tests/captcha_support`), then the exchange."""
+    """The route as a browser reaches it: the portal surface, then the exchange.
+    A proof is not required."""
     _set_verify(monkeypatch, identity)
     response = Response()
     body = FirebaseSessionIn(
         id_token="t" * 40,
-        captcha_proof=await captcha_proof(purpose),
         captcha_purpose=purpose,
     )
     out = await firebase_session(body, response, session)

@@ -33,7 +33,6 @@ import type {
 } from "@/lib/types";
 import { AuthLink, AuthShell } from "@/components/auth-shell";
 import { formatInr } from "@/components/billing/credit-pack-picker";
-import { Captcha, CaptchaError, type CaptchaHandle } from "@/components/captcha";
 import { INDUSTRIES } from "@/components/customer-edit-modal";
 import { InlineError, LoadingRows } from "@/components/page-primitives";
 import {
@@ -79,7 +78,6 @@ const EMPTY_DETAILS: Details = {
 
 /** The server's sentence when it gave one, else `fallback`. */
 function sentence(error: unknown, fallback: string): string {
-  if (error instanceof CaptchaError) return error.message;
   if (error instanceof ApiError && error.message) return error.message;
   return fallback;
 }
@@ -104,7 +102,6 @@ export function CompanyRegisterFlow() {
   const [password, setPassword] = React.useState("");
   const [showPassword, setShowPassword] = React.useState(false);
   const [existingSignIn, setExistingSignIn] = React.useState(false);
-  const captcha = React.useRef<CaptchaHandle>(null);
   const rules = passwordRules(password);
 
   const loadState = React.useCallback(async () => {
@@ -206,11 +203,9 @@ export function CompanyRegisterFlow() {
         }
         return;
       }
-      const proof = await captcha.current!.prove();
       await apiPost(`${BASE}/register`, {
         ...details,
         industry_other: details.industry === "Other" ? details.industry_other : null,
-        captcha_proof: proof,
       });
       setPendingEmail(details.email.trim());
       setState({ stage: "verify_email", email: details.email.trim() });
@@ -488,9 +483,6 @@ export function CompanyRegisterFlow() {
               </div>
             </div>
           ) : null}
-          {demoModeEnabled() ? null : (
-            <Captcha ref={captcha} purpose="company_register" disabled={busy} idPrefix="reg-captcha" />
-          )}
           <Button size="lg" className="w-full" disabled={busy}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
             {demoModeEnabled() ? "Create demo workspace" : "Send security code"}

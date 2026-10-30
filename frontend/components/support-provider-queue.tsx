@@ -208,7 +208,7 @@ export function SupportProviderQueue() {
                       className={cn(
                         "w-full rounded-lg border p-3 text-left transition",
                         thread.id === selectedId
-                          ? "border-navy-600 bg-navy-50 dark:bg-navy-950"
+                          ? "border-navy-600 bg-navy-50"
                           : "border-navy-200 hover:border-navy-600",
                       )}
                     >

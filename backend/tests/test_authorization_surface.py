@@ -85,9 +85,9 @@ ROUTERS = {
     "candidates": candidates,
     "companies": companies,
     # Company self-registration (2026-09-29). Every write here is made by
-    # somebody with no account yet, so each is authorized by a proof rather
-    # than a session: a CAPTCHA proof, a security code, or the onboarding
-    # cookie those two mint.
+    # somebody with no account yet, so none asks for a session. Later steps
+    # are authorized by a security code or the onboarding cookie that code
+    # mints.
     "company_onboarding": company_onboarding,
     "dashboard": dashboard,
     "emails": emails,
@@ -160,18 +160,11 @@ PUBLIC_BY_DESIGN: dict[str, str] = {
     "/demo/session": "public demo session, 404 unless DEMO_MODE is on",
     # Public demo company registration. Same flag. No CAPTCHA, no Razorpay.
     "/demo": "public demo company registration, 404 unless DEMO_MODE is on",
-    # The CAPTCHA (auth hardening, 2026-09-29). Answered before anybody has
-    # a session, so it cannot require one. The challenge writes one Redis row
-    # and the verify spends it; both are rate limited, and the challenge's own
-    # attempt count and single use are what protect it.
-    "/captcha/challenge": "anonymous by necessity, draws a challenge",
-    "/captcha/verify": "anonymous by necessity, spends a challenge",
     # Forgotten password. The person cannot sign in, which is the whole
-    # point. The request needs a single-use CAPTCHA proof and answers the same
-    # sentence for every address; the verify needs the six-digit code that
-    # went to the mailbox; the complete needs the single-use ticket the verify
-    # minted. Each step is authorized by the proof the step before produced.
-    "/password-reset/request": "CAPTCHA proof, enumeration safe",
+    # point. The request is rate limited and answers the same sentence for
+    # every address. The verify needs the six-digit code that went to the
+    # mailbox. The complete needs the single-use ticket the verify minted.
+    "/password-reset/request": "cannot sign in, rate limited, same sentence for every address",
     "/password-reset/verify": "security code from the mailbox",
     "/password-reset/complete": "single-use reset ticket",
     # Authorized by a single-use, short-lived context_token in the body, minted
@@ -199,11 +192,11 @@ PUBLIC_BY_DESIGN: dict[str, str] = {
     # definition somebody who has not signed in for six months.
     "/consent/renew": "single-use renewal token, keeps a profile and nothing else",
     # Company self-registration (2026-09-29). The person has no account, so
-    # these cannot ask for one. The register step spends a single-use
-    # company_register CAPTCHA proof first and answers the same sentence for
-    # every address; the resend writes only to a registration already
-    # started; the verify needs the six-digit code from the mailbox.
-    "/register": "CAPTCHA proof, enumeration safe",
+    # these cannot ask for one. The register step is rate limited and answers
+    # the same sentence for every address; the resend writes only to a
+    # registration already started; the verify needs the six-digit code from
+    # the mailbox.
+    "/register": "rate limited, same sentence for every address",
     "/code/resend": "writes only to a registration already started, rate limited",
     "/code/verify": "security code from the mailbox",
 }

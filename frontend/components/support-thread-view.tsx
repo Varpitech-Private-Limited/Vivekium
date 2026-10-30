@@ -111,7 +111,7 @@ export function SupportMessageBubble({
           "whitespace-pre-wrap break-words",
           mine
             ? "border-navy-600 bg-navy-600 text-white"
-            : "border-navy-200 bg-white text-ink dark:bg-navy-950",
+            : "border-border bg-card text-foreground",
         )}
       >
         {message.body}

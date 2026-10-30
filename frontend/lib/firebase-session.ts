@@ -9,9 +9,6 @@ import type {
   Role,
 } from "@/lib/types";
 import { isContextsResponse } from "@/lib/types";
-import type { CaptchaPurpose } from "@/components/captcha";
-import { CaptchaError } from "@/components/captcha";
-
 /**
  * Result of trading a Firebase ID token for a ReadyPick session.
  * The backend returns EITHER a finalized single-user session (cookies set)
@@ -20,37 +17,33 @@ import { CaptchaError } from "@/components/captcha";
 export type FirebaseExchangeResult = AuthSession | AuthContextsResponse;
 
 /**
- * The surfaces that may open a session, each with its own security check.
- * The purpose IS the portal: a candidate sign-in opens the candidate
- * workspace, a company sign-in (or an invitation) the company one, and the
- * Provider and business development sign-ins their consoles.
+ * The surfaces that may open a session. The purpose IS the portal: a
+ * candidate sign-in opens the candidate workspace, a company sign-in (or an
+ * invitation) the company one, and the Provider and business development
+ * sign-ins their consoles. The wire name is still `captcha_purpose`.
  */
-export type ExchangePurpose = Extract<
-  CaptchaPurpose,
+export type ExchangePurpose =
   | "candidate_login"
   | "candidate_register"
   | "company_login"
   | "invite_join"
   | "provider_login"
-  | "bd_login"
->;
+  | "bd_login";
 
 export { isContextsResponse };
 
 /**
- * POST /auth/firebase/session, trade a freshly minted Firebase ID token and a
- * single-use security check proof for a ReadyPick session. Single-user →
- * {user, capabilities} (cookies set). Multi-workspace → {contexts,
- * context_token} (no cookies yet).
+ * POST /auth/firebase/session, trade a freshly minted Firebase ID token for a
+ * ReadyPick session. Single-user → {user, capabilities} (cookies set).
+ * Multi-workspace → {contexts, context_token} (no cookies yet).
  */
 export async function exchangeFirebaseSession(
   user: FirebaseUser,
-  captcha: { proof: string; purpose: ExchangePurpose }
+  purpose: ExchangePurpose
 ): Promise<FirebaseExchangeResult> {
   return apiPost<FirebaseExchangeResult>("/auth/firebase/session", {
     id_token: await user.getIdToken(),
-    captcha_proof: captcha.proof,
-    captcha_purpose: captcha.purpose,
+    captcha_purpose: purpose,
   });
 }
 
@@ -91,9 +84,6 @@ export const ROLE_LABEL: Record<Role, string> = {
  * be noise rather than signal.
  */
 export function friendlyAuthError(err: unknown): string | null {
-  // The security check's own sentence, already written for a person.
-  if (err instanceof CaptchaError) return err.message;
-
   // Backend rejection (e.g. staff attempting Google sign-in → 403).
   if (err instanceof ApiError) {
     const raw =
@@ -120,8 +110,8 @@ export function friendlyAuthError(err: unknown): string | null {
       }
       return "This sign-in method isn't available for your account.";
     }
-    // A refused security check, an expired step, a password rule: the
-    // server's sentence is already written for a person.
+    // An expired step or a password rule: the server's sentence is already
+    // written for a person.
     if ((err.status === 400 || err.status === 409 || err.status === 422) && detail) {
       return detail;
     }

@@ -35,7 +35,6 @@ import { useAuth } from "@/lib/auth-context";
 import { apiErrorMessage } from "@/lib/validation-errors";
 import type { AuthSession, StaffRole } from "@/lib/types";
 import { AuthShell } from "@/components/auth-shell";
-import { Captcha, type CaptchaHandle } from "@/components/captcha";
 import { InlineError, LoadingRows } from "@/components/page-primitives";
 import {
   PasswordRules,
@@ -84,7 +83,6 @@ export function JoinFlow({ token }: { token: string }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [accepted, setAccepted] = React.useState(false);
-  const captcha = React.useRef<CaptchaHandle>(null);
   const rules = passwordRules(password);
   const passwordValid = isPasswordValid(rules);
   const tokenPath = `/companies/invites/${encodeURIComponent(token)}`;
@@ -119,12 +117,10 @@ export function JoinFlow({ token }: { token: string }) {
   );
 
   const createAccount = async () => {
-    const proof = await captcha.current!.prove();
     try {
       joined(
         await apiPost<AuthSession>(`/companies/invites/${encodeURIComponent(token)}/setup-password`, {
           password,
-          captcha_proof: proof,
           full_name: name.trim() || null,
         })
       );
@@ -140,16 +136,12 @@ export function JoinFlow({ token }: { token: string }) {
 
   const signInExisting = async () => {
     if (!invite) return;
-    const proof = await captcha.current!.prove();
     const credential = await signInWithEmailAndPassword(
       firebaseAuth,
       invite.email,
       password
     );
-    const result = await exchangeFirebaseSession(credential.user, {
-      proof,
-      purpose: "invite_join",
-    });
+    const result = await exchangeFirebaseSession(credential.user, "invite_join");
     let session: AuthSession;
     if (isContextsResponse(result)) {
       const target = result.contexts.find(
@@ -193,7 +185,6 @@ export function JoinFlow({ token }: { token: string }) {
               `/companies/invites/${encodeURIComponent(token)}/setup-password`,
               {
                 password,
-                captcha_proof: "demo-mode-placeholder",
                 full_name: name.trim() || null,
               }
             )
@@ -385,7 +376,6 @@ export function JoinFlow({ token }: { token: string }) {
           </div>
           {mode === "create" ? <PasswordRules rules={rules} /> : null}
         </div>
-        <Captcha ref={captcha} purpose="invite_join" disabled={busy} idPrefix="join-captcha" />
         <Button
           size="lg"
           className="w-full"

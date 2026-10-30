@@ -102,7 +102,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.db import get_identity_session
 from app.core.security import audience_for_role
 from app.schemas.auth import InviteSetupPasswordIn, SessionOut
-from app.services import captcha, firebase_auth, password_policy, staff_invites
+from app.services import firebase_auth, password_policy, staff_invites
 from app.services.audit import AUTH_LOGIN_SUCCEEDED, record_auth_event
 from app.services.rate_limit import rate_limit
 
@@ -1135,10 +1135,11 @@ async def setup_invite_password(
     """Create the invited person's password sign-in, bind it, accept the
     invitation and open their company session, in that order.
 
-    The rule and the CAPTCHA come first; the token is resolved before any
-    identity is created; the Firebase identity is created before the rows are
-    written, and deleted again when the rows cannot be committed, so a failed
-    setup never leaves a sign-in that no account owns.
+    The password rule comes first; the token is resolved before any identity
+    is created; the Firebase identity is created before the rows are written,
+    and deleted again when the rows cannot be committed, so a failed setup
+    never leaves a sign-in that no account owns. A proof on the body is not
+    read (A-24). The route stays rate limited.
     """
     from app.api import auth as auth_api
     from app.services import demo_access
@@ -1150,7 +1151,6 @@ async def setup_invite_password(
             return await _accept_public_demo_invite(body, response, session, invite)
 
     password_policy.require_valid(body.password)
-    await captcha.consume_proof(body.captcha_proof, "invite_join")
     invite = await _resolve_invite(session, token)
     staff_user = await session.get(User, invite.user_id)
     if staff_user is None or staff_user.status == UserStatus.disabled:
@@ -1210,7 +1210,7 @@ async def _accept_public_demo_invite(
     session: AsyncSession,
     invite,
 ) -> SessionOut:
-    """Accept a public demo invite without Firebase, a password rule, or CAPTCHA.
+    """Accept a public demo invite without Firebase or a password rule.
 
     The invite token is the authorization. The password is nonempty and is
     not stored. firebase_uid stays empty so a later real sign-in cannot bind

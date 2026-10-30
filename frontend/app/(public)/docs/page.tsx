@@ -319,7 +319,7 @@ export default function DocsPage() {
           </FadeIn>
 
           <FadeIn delay={0.08}>
-            <div className="relative rounded-3xl border border-white/10 bg-[#090b16] p-5 text-white shadow-pop sm:p-7">
+            <div className="relative rounded-3xl border border-white/10 bg-black p-5 text-white shadow-pop sm:p-7">
               <div className="absolute right-5 top-5 flex gap-1.5" aria-hidden="true">
                 <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
                 <span className="h-2.5 w-2.5 rounded-full bg-amber-300" />
@@ -615,7 +615,7 @@ export default function DocsPage() {
           </section>
 
           <section id="technical" className="scroll-mt-24 pt-28">
-            <div className="rounded-3xl bg-[#090b16] p-7 text-white sm:p-10">
+            <div className="rounded-3xl bg-black p-7 text-white sm:p-10">
               <p className="type-eyebrow text-teal-400">
                 Technical documentation
               </p>
@@ -852,7 +852,7 @@ export default function DocsPage() {
               body="The repository is container-ready, but the exact current topology was manual and external: there was no checked-in infrastructure as code or CI/CD pipeline."
             />
 
-            <div className="mt-10 rounded-3xl border border-border bg-[#090b16] p-6 text-white shadow-pop sm:p-8">
+            <div className="mt-10 rounded-3xl border border-border bg-black p-6 text-white shadow-pop sm:p-8">
               <div className="grid gap-4 lg:grid-cols-[.9fr_1.2fr_.9fr] lg:items-center">
                 <div className="space-y-3">
                   {[
@@ -1003,7 +1003,7 @@ export default function DocsPage() {
                 </div>
                 <a
                   href="/login?initial_context=all"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-5 text-sm font-semibold text-brand-700 transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-white px-5 text-sm font-semibold text-black transition-transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                 >
                   Open Vivekium
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />

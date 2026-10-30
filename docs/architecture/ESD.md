@@ -1,6 +1,6 @@
 # Vivekium Engineering and System Design
 
-**Status:** current. **Reviewed:** 2026-10-14 against the decision register, the specs it links and the module, table and test names it cites (names were checked to exist; behaviour is described from the specs and prior records, not re-run). Sections that rest on an owner decision not yet built say so.
+**Status:** current. **Reviewed:** 2026-10-14 against the decision register, the specs it links and the module, table and test names it cites (names were checked to exist; behaviour is described from the specs and prior records, not re-run). **Updated:** 2026-10-30 (A-24). Sections that rest on an owner decision not yet built say so.
 **Authority:** the latest dated owner decisions ([../decisions/REGISTER.md](../decisions/REGISTER.md)) and the specifications in [../spec/](../spec/); code, migrations and tests are the evidence of what exists. Removed designs are in [../history/](../history/).
 
 ## 1. Purpose
@@ -106,7 +106,7 @@ Migrations: linear chain, head `0137_public_demo`; additive and guarded; run as 
 
 ## 7. Authentication and sessions
 
-The browser signs in with Firebase (Google, or email and password) and sends the ID token to `/api/v1/auth/firebase/session`, after a server-checked CAPTCHA proof. The API verifies it, resolves the account's workspace from its own record (the sign-in form never asks; a chooser appears only when one identity holds several memberships) and issues application sessions with distinct JWT audiences for provider owner, company and candidate; BD sessions use the owner audience with no tenant context. Google never signs in a company role.
+The browser signs in with Firebase (Google, or email and password) and sends the ID token to `/api/v1/auth/firebase/session`. No challenge is drawn and no proof is checked (A-24). The field `captcha_purpose` is only the portal filter (candidate, org, owner, bd). `captcha_proof` may still be sent by an old client and is not read. The API verifies the token, resolves the account's workspace from its own record (the sign-in form never asks; a chooser appears only when one identity holds several memberships) and issues application sessions with distinct JWT audiences for provider owner, company and candidate; BD sessions use the owner audience with no tenant context. Google never signs in a company role. The CAPTCHA removal is not deployed yet.
 
 Cookies (access, refresh, session hint) are httpOnly, Secure on HTTPS, SameSite=Strict, with no Max-Age, so a session ends with the browser. The access JWT lives 15 minutes; a Redis session record enforces 30 minutes idle, moved only by real user activity. Refresh rotation is atomic; logout or password change revokes the server record; a cookie with no session id is refused. Firebase identity is held only in memory. Password reset and change are server-side behind a security code and a single-use ticket. `tenants` and `users` have forced RLS; login, refresh and workspace resolution use the documented identity-resolution bypass. Candidate identity: one person, one record, resolved by `candidates.user_id`. Rules: [../engineering/security.md](../engineering/security.md).
 

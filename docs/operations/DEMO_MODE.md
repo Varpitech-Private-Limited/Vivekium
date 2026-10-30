@@ -1,14 +1,14 @@
 # Public demo mode
 
-**Status:** current. **Reviewed:** 2026-10-30 against the owner statement of that date (register A-23). The behavior below is specified. The flag ships default off. Live activation is not done. This page does not put https://readypick.ai into demo mode. September 2026 account cost was about $116.60 unblended, including tax, measured from Cost Explorer for account 016617990245. October was still estimated and is not a bill.
+**Status:** current. **Reviewed:** 2026-10-30 against the owner statements of that date (register A-23 and A-24). The behavior below is specified. The code default for the flag is off. As of 2026-10-30 the pilot task definition for the API (`readypick-pilot-api:55`) sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image (`readypick-pilot-frontend:45`, tag `sha-d51149b0b0bf`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. tfvars were not changed and must not say `demo_mode=true`. The CAPTCHA removal (A-24) is not deployed yet. September 2026 account cost was about $116.60 unblended, including tax, measured from Cost Explorer for account 016617990245. October was still estimated and is not a bill.
 
-A-23 amends A-02 and A-05 only while `DEMO_MODE` is on. Register: [../decisions/REGISTER.md](../decisions/REGISTER.md). What runs on AWS: [INFRA_TOPOLOGY.md](INFRA_TOPOLOGY.md). Image rollback: [DEPLOY_AWS.md](DEPLOY_AWS.md) section 7.
+A-23 amends A-05 only while `DEMO_MODE` is on. A-24 removed the server-drawn CAPTCHA from every auth surface, including when the flag is off. Register: [../decisions/REGISTER.md](../decisions/REGISTER.md). What runs on AWS: [INFRA_TOPOLOGY.md](INFRA_TOPOLOGY.md). Image rollback: [DEPLOY_AWS.md](DEPLOY_AWS.md) section 7.
 
 `public_demo` is a new column (migration head `0137_public_demo`). It is not `is_demo`. `is_demo` remains the C-07 billing-exemption flag.
 
 ## Enable
 
-Public demo mode is off unless an operator turns it on.
+The code default is off unless an operator turns it on. The pilot task definition named in the status line carries the flag. Do not write `demo_mode=true` into tfvars.
 
 | Setting | Role |
 |---|---|
@@ -16,15 +16,15 @@ Public demo mode is off unless an operator turns it on.
 | `NEXT_PUBLIC_DEMO_MODE` | Frontend gate. Default off. Next inlines it at image build, so the frontend image must be built with `--build-arg NEXT_PUBLIC_DEMO_MODE=true` (the remote builder's `--public-demo`). A task environment variable does not turn the UI on. An empty value is off. Set it in the same release as `DEMO_MODE`. |
 | `DEMO_MODE_CONFIRM` | Required only when `DEMO_MODE` is on and `ENVIRONMENT=production`. The value must be `public-demo`. |
 
-The live pilot sets `ENVIRONMENT=production`, even though the Terraform composition is named pilot. Turning the flag on there without the confirm refuses to boot (below). Other environments do not require the confirm. The flag still defaults off everywhere.
+The live pilot sets `ENVIRONMENT=production`, even though the Terraform composition is named pilot. Turning the flag on there without the confirm refuses to boot (below). Other environments do not require the confirm. The code default is off. As of 2026-10-30 the pilot API task definition `readypick-pilot-api:55` sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image `readypick-pilot-frontend:45` (tag `sha-d51149b0b0bf`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. tfvars were not changed and must not say `demo_mode=true`.
 
-When the flag is off, existing Firebase, CAPTCHA and Razorpay routes stay unchanged. The skips below do not run.
+When the flag is off, existing Firebase and Razorpay routes stay unchanged. A-24 removed the CAPTCHA everywhere, including when the flag is off. The skips below do not run. The CAPTCHA removal is not deployed yet.
 
 ## Confirm gate
 
 On `ENVIRONMENT=production`, `DEMO_MODE` also requires `DEMO_MODE_CONFIRM=public-demo`. A missing confirm refuses to boot. A value other than `public-demo` does not satisfy the gate.
 
-While `DEMO_MODE` is unset or false, production boots without this confirm. Do not treat a running pilot as proof that the confirm is set, and do not treat the confirm as a switch that is already on.
+While `DEMO_MODE` is unset or false, production boots without this confirm. The pilot API task definition named above carries both `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. Do not treat an arbitrary running task as proof the confirm is set. tfvars were not changed and must not say `demo_mode=true`.
 
 ## Who can be created or retrieved
 
@@ -35,11 +35,11 @@ Demo login (`POST /api/v1/auth/demo/session`) accepts any syntactically valid em
 | Company login | Retrieves only. Does not create. |
 | Company registration (`POST /api/v1/company-onboarding/demo`) | Creates. |
 | Candidate login | Creates or retrieves. Must not claim a sourced candidate (`email_verified` false). |
-| Invite setup-password, `public_demo` branch | The existing `POST /api/v1/companies/invites/{token}/setup-password` handler (also mounted under `/api/v2`). The `public_demo` branch skips CAPTCHA, Firebase and Razorpay only when the flag is on. |
+| Invite setup-password, `public_demo` branch | The existing `POST /api/v1/companies/invites/{token}/setup-password` handler (also mounted under `/api/v2`). The `public_demo` branch skips Firebase and Razorpay only when the flag is on. |
 
 `GET /api/v1/auth/demo-status` reports the flag. It does not mint a session.
 
-Only these paths skip CAPTCHA, Firebase and Razorpay, and only when the flag is on:
+Only these paths skip Firebase and Razorpay, and only when the flag is on:
 
 - `POST /api/v1/auth/demo/session`
 - `POST /api/v1/company-onboarding/demo`
@@ -81,7 +81,7 @@ AI agents, assessments, rankings, workers, row-level security and capabilities s
 
 ## Limits
 
-- The flag ships default off. Live activation is not done in this document. https://readypick.ai is not in demo mode.
+- The code default is off. As of 2026-10-30 the pilot task definition for the API (`readypick-pilot-api:55`) sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image (`readypick-pilot-frontend:45`, tag `sha-d51149b0b0bf`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. tfvars were not changed and must not say `demo_mode=true`. The CAPTCHA removal (A-24) is not deployed yet.
 - Do not commit `demo_mode = true` in tfvars. `DEMO_*` can stay as application defaults so a later apply does not roll tasks just to set false. Enabling the flag is an operator action.
 - September 2026 Cost Explorer (account 016617990245, unblended, estimated false, grouped by service) was about $116.60 including $17.78 tax. The largest lines were EC2 Other $35.22 (NAT and endpoints), RDS $26.45, ELB $15.05, and ElastiCache $12.56. October was still Estimated and is not reported as a bill. The live composition in [INFRA_TOPOLOGY.md](INFRA_TOPOLOGY.md) is Postgres on `db.t4g.medium`, Fargate services, Lambda and NAT. Judge0 was destroyed (S-20) and is not part of this mode.
 - Fargate on-demand vCPU quota in ap-south-2 is 2 (L-3032A538). On 2026-10-30 the analysis service (2 vCPU) was scaled to desired count 0 with the AWS CLI so the API task could place. The ECS module rejects a standing service at 0, so pilot Terraform keeps `desired_count = local.service_count` and `ignore_changes` on desired count holds the CLI value. Do not raise the running count until the quota is raised. Proctoring analysis stays off while the count is 0. Lambda concurrent execution quota is 1000, not 10.

@@ -7,8 +7,8 @@
   which is why the route that took a fresh Firebase token to revoke them
   existed. The server changes the password now and revokes in the same
   request, so all three are gone, route included.
-* The session exchange takes a CAPTCHA purpose, and the purpose IS the portal
-  intent; the separate `requested_portal` field is gone.
+* The session exchange takes captcha_purpose, and that field is the portal
+  filter; the separate `requested_portal` field is gone.
 * No company surface offers Google: the invitation page, and the company
   sign-in page, carry no Google button.
 
@@ -34,8 +34,6 @@ def test_the_retired_route_is_not_mounted() -> None:
     paths = set(app.openapi()["paths"])
     assert not [path for path in paths if path.endswith("/password-changed")]
     for path in (
-        "/api/v1/auth/captcha/challenge",
-        "/api/v1/auth/captcha/verify",
         "/api/v1/auth/password-reset/request",
         "/api/v1/auth/password-change/complete",
         "/api/v1/companies/invites/{token}/setup-password",

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 //
 // Register your company (owner spec 2026-09-29, sections 2.2 and 5). Pinned:
-// the page resumes at the step the SERVER reports; the details step spends a
-// `company_register` security check proof and offers no Google; the first
+// the page resumes at the step the SERVER reports; the details step offers no
+// Google and does not ask for a security check; the first
 // purchase goes through the onboarding routes (never a billing or
 // subscription route) and success is only claimed after the server verifies
 // the payment; the password step opens the workspace, and an address that
@@ -44,10 +44,6 @@ function serve(overrides: Record<string, (body: unknown) => unknown> = {}) {
   });
   http.apiPost.mockImplementation(async (path: string, body: unknown) => {
     if (overrides[path]) return overrides[path](body);
-    if (path === "/auth/captcha/challenge") {
-      return { challenge_id: "c1", image: "data:image/svg+xml;base64,PHN2Zy8+", expires_in: 300 };
-    }
-    if (path === "/auth/captcha/verify") return { captcha_proof: "proof-1" };
     if (path === "/company-onboarding/register") return { message: "sent" };
     if (path === "/company-onboarding/code/verify") {
       return { stage: "choose_pack", email: "founder@circa.com", company_name: "Circa Corp" };
@@ -76,20 +72,18 @@ function posted(): string[] {
 }
 
 describe("register your company", () => {
-  it("sends the details with a company_register proof and offers no Google", async () => {
+  it("sends the details with no security check and offers no Google", async () => {
     serve();
     render(<CompanyRegisterFlow />);
-    await screen.findByAltText(/security check characters/i);
     expect(screen.queryByRole("button", { name: /google/i })).toBeNull();
-    expect(http.apiPost).toHaveBeenCalledWith("/auth/captcha/challenge", { purpose: "company_register" });
+    expect(screen.queryByLabelText("Security check")).toBeNull();
 
-    fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Saravan" } });
+    fireEvent.change(await screen.findByLabelText("First name"), { target: { value: "Saravan" } });
     fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Kumar" } });
     fireEvent.change(screen.getByLabelText("Company email"), { target: { value: "founder@circa.com" } });
     fireEvent.change(screen.getByLabelText("Mobile number"), { target: { value: "98765 43210" } });
     fireEvent.change(screen.getByLabelText("Company name"), { target: { value: "Circa Corp" } });
     fireEvent.change(screen.getByLabelText("Industry"), { target: { value: "Technology" } });
-    fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "k7m2px" } });
     fireEvent.click(screen.getByRole("button", { name: "Send security code" }));
 
     await screen.findByLabelText("Security code");
@@ -101,7 +95,6 @@ describe("register your company", () => {
       company_name: "Circa Corp",
       industry: "Technology",
       industry_other: null,
-      captcha_proof: "proof-1",
     });
   });
 

@@ -101,12 +101,6 @@ function homeFor(role: SessionRole): string {
   return "/org";
 }
 
-const CHALLENGE = {
-  challenge_id: "c1",
-  image: "data:image/svg+xml;base64,PHN2Zy8+",
-  expires_in: 300,
-};
-
 const trace: string[] = [];
 
 function paths(): string[] {
@@ -133,8 +127,6 @@ function installSignIn(demo: "ok" | number, role: SessionRole) {
   const session = makeSession(role);
   http.apiPost.mockImplementation(async (path: string) => {
     trace.push(path);
-    if (path === "/auth/captcha/challenge") return CHALLENGE;
-    if (path === "/auth/captcha/verify") return { captcha_proof: "proof-1" };
     if (path === "/auth/demo/session") {
       if (demo !== "ok") throw new ApiError(demo, { detail: "Demo sign-in was refused." });
       return session;
@@ -151,10 +143,7 @@ function installSignIn(demo: "ok" | number, role: SessionRole) {
 
 async function submitSignIn(): Promise<number> {
   await screen.findByLabelText("Email address");
-  if (screen.queryByLabelText("Security check")) {
-    await screen.findByAltText(/security check characters/i);
-    fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "k7m2px" } });
-  }
+  expect(screen.queryByLabelText("Security check")).toBeNull();
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "a@b.test" } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret-123" } });
   const start = trace.length;
@@ -200,7 +189,6 @@ describe("demo sign-in", () => {
     await waitFor(() => expect(auth.setSession).toHaveBeenCalled());
     expect(trace[start]).toBe("/auth/demo/session");
     expectDemoCredentials("candidate");
-    expect(trace).not.toContain("/auth/captcha/verify");
     expect(trace).not.toContain("/auth/firebase/session");
     expect(firebaseSdk.signInWithEmailAndPassword).not.toHaveBeenCalled();
     expect(auth.setSession).toHaveBeenCalledWith(session.user, session.capabilities);
@@ -265,8 +253,7 @@ describe("demo sign-in", () => {
       expect(trace[start]).toBe("/auth/demo/session");
       expectDemoCredentials("company");
       const demoAt = trace.indexOf("/auth/demo/session");
-      expect(trace.indexOf("/auth/captcha/verify")).toBeGreaterThan(demoAt);
-      expect(trace.indexOf("firebase")).toBeGreaterThan(trace.indexOf("/auth/captcha/verify"));
+      expect(trace.indexOf("firebase")).toBeGreaterThan(demoAt);
       expect(trace.indexOf("/auth/firebase/session")).toBeGreaterThan(trace.indexOf("firebase"));
       expect(firebaseSdk.signInWithEmailAndPassword).toHaveBeenCalledWith(
         { name: "test-auth" },
@@ -277,7 +264,6 @@ describe("demo sign-in", () => {
         "/auth/firebase/session",
         expect.objectContaining({
           id_token: "id-token",
-          captcha_proof: "proof-1",
           captcha_purpose: "company_login",
         }),
       );
@@ -329,7 +315,6 @@ describe("demo sign-in", () => {
         "/auth/firebase/session",
         expect.objectContaining({
           id_token: "id-token",
-          captcha_proof: "proof-1",
           captcha_purpose: PURPOSE[surface],
         }),
       );
@@ -349,7 +334,7 @@ describe("demo sign-in", () => {
 
       await waitFor(() => expect(auth.setSession).toHaveBeenCalled());
       expect(trace).not.toContain("/auth/demo/session");
-      expect(trace[start]).toBe("/auth/captcha/verify");
+      expect(trace[start]).toBe("firebase");
       expect(firebaseSdk.signInWithEmailAndPassword).toHaveBeenCalledWith(
         { name: "test-auth" },
         "a@b.test",
@@ -359,7 +344,6 @@ describe("demo sign-in", () => {
         "/auth/firebase/session",
         expect.objectContaining({
           id_token: "id-token",
-          captcha_proof: "proof-1",
           captcha_purpose: PURPOSE[surface],
         }),
       );
@@ -391,8 +375,6 @@ function installCompany() {
   });
   http.apiPost.mockImplementation(async (path: string) => {
     trace.push(path);
-    if (path === "/auth/captcha/challenge") return CHALLENGE;
-    if (path === "/auth/captcha/verify") return { captcha_proof: "proof-1" };
     if (path === "/company-onboarding/demo") return COMPANY_SESSION;
     if (path === "/company-onboarding/register") return { message: "sent" };
     throw new Error(`unexpected POST ${path}`);
@@ -410,10 +392,7 @@ async function fillCompanyDetails() {
   if (screen.queryByLabelText("Password")) {
     fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Circa-Corp-2026" } });
   }
-  if (screen.queryByLabelText("Security check")) {
-    await screen.findByAltText(/security check characters/i);
-    fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "k7m2px" } });
-  }
+  expect(screen.queryByLabelText("Security check")).toBeNull();
 }
 
 describe("demo company registration", () => {
@@ -458,7 +437,6 @@ describe("demo company registration", () => {
       company_name: "Circa Corp",
       industry: "Technology",
       industry_other: null,
-      captcha_proof: "proof-1",
     });
     expect(paths()).not.toContain("/company-onboarding/demo");
   });

@@ -43,7 +43,6 @@ from app.models.job import Job
 from app.models.tenant import AuditLog, Tenant
 from app.models.user import User
 from app.schemas.auth import FirebaseSessionIn
-from tests.captcha_support import captcha_proof
 from app.services import candidate_identity, firebase_auth
 from app.services.firebase_auth import FirebaseIdentity
 
@@ -89,7 +88,6 @@ async def _sign_in(factory, identity: FirebaseIdentity, monkeypatch):
             return await firebase_session(
                 FirebaseSessionIn(
                     id_token="t" * 40,
-                    captcha_proof=await captcha_proof("candidate_login"),
                     captcha_purpose="candidate_login",
                 ),
                 Response(),

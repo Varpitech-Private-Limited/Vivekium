@@ -1,6 +1,6 @@
 """Company self-registration: `/api/v1/company-onboarding` (owner spec 2.2, 5, 24).
 
-    POST /register             details + CAPTCHA -> a security code (or a notice)
+    POST /register             details -> a security code (or a notice)
     POST /demo                 public demo company, simulated charge, org session
     POST /code/verify          the code -> onboarding tenant, invited client, cookie
     POST /code/resend          a new code for a registration already started
@@ -13,8 +13,7 @@
 WHO IS ASKING, AND HOW THAT IS PROVEN
 -------------------------------------
 Nobody here has a portal session, and until the code is verified there is no
-tenant at all. So the proofs are, in order: a single-use CAPTCHA proof
-(`company_register`) before any email is sent; the six-digit security code
+tenant at all. So the proofs are, in order: the six-digit security code
 from the mailbox before any tenant is created; then the ONBOARDING COOKIE
 (`services/company_onboarding`, its own audience, sixty minutes) for every
 later step, each of which reads the ONE registration the cookie names. The
@@ -85,7 +84,6 @@ from app.schemas.company_onboarding import (
     RegistrationIn,
 )
 from app.services import (
-    captcha,
     company_onboarding as onboarding,
     credits,
     demo_access,
@@ -314,12 +312,12 @@ async def _send_code(session: AsyncSession, registration: CompanyRegistration, c
 async def register(
     body: RegistrationIn, session: AsyncSession = Depends(get_onboarding_db)
 ) -> RegistrationAcceptedOut:
-    """Accept the form and send a security code, CAPTCHA first (spec 5.2).
+    """Accept the form and send a security code (spec 5.2).
 
     Only the FIRST Company Super Admin registers publicly: the account this
     creates is always `client`, and nothing in the body can name a role.
+    A proof on the body is not read (A-24). The route stays rate limited.
     """
-    await captcha.consume_proof(body.captcha_proof, CODE_PURPOSE)
     email = body.email
     registration = await _open_registration(session, email, lock=True)
     if registration is None or registration.status == REGISTRATION_PENDING:

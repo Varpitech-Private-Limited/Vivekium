@@ -40,19 +40,15 @@ afterEach(() => {
 function serve(setup: () => unknown) {
   http.apiGet.mockResolvedValue(INVITE);
   http.apiPost.mockImplementation(async (path: string) => {
-    if (path === "/auth/captcha/challenge") {
-      return { challenge_id: "c1", image: "data:image/svg+xml;base64,PHN2Zy8+", expires_in: 300 };
-    }
-    if (path === "/auth/captcha/verify") return { captcha_proof: "proof-j" };
     if (path.endsWith("/setup-password")) return setup();
     throw new Error(`unexpected POST ${path}`);
   });
 }
 
 async function fillAndSubmit() {
-  await screen.findByAltText(/security check characters/i);
+  await screen.findByLabelText("Create a password");
+  expect(screen.queryByLabelText("Security check")).toBeNull();
   fireEvent.change(screen.getByLabelText("Create a password"), { target: { value: "Join-Team-7" } });
-  fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "k7m2px" } });
   fireEvent.click(screen.getByRole("button", { name: "Create password and join" }));
 }
 
@@ -71,7 +67,7 @@ describe("JoinFlow", () => {
       "/companies/invites/tok-1/setup-password",
       expect.anything(),
     );
-    expect(body).toEqual({ password: "Join-Team-7", captcha_proof: "proof-j", full_name: "Asha Rao" });
+    expect(body).toEqual({ password: "Join-Team-7", full_name: "Asha Rao" });
     expect(await screen.findByText("You joined Acme")).toBeTruthy();
   });
 

@@ -28,8 +28,7 @@ from app.models.invite import StaffInvite, hash_invite_token, invite_expiry
 from app.models.tenant import AuditLog, Tenant
 from app.models.user import User
 from app.schemas.auth import InviteSetupPasswordIn
-from app.services import auth_sessions, captcha, firebase_auth
-from tests.captcha_support import captcha_proof
+from app.services import auth_sessions, firebase_auth
 
 
 PASSWORD = "Join-The-Team-7"
@@ -91,7 +90,7 @@ async def _setup(factory, token: str, *, proof: str | None = None, password: str
     response = Response()
     body = InviteSetupPasswordIn(
         password=password,
-        captcha_proof=proof or await captcha_proof("invite_join"),
+        captcha_proof=proof,
         full_name=name,
     )
     async with factory() as session, superadmin_scope(session):
@@ -143,13 +142,11 @@ async def test_the_password_is_created_for_exactly_the_invited_email(world) -> N
     assert again.value.status_code == 410
 
 
-async def test_setup_needs_an_invite_join_proof(world) -> None:
-    factory, token, _email, _user_id, created = world
-    with pytest.raises(captcha.CaptchaRequired):
-        await _setup(factory, token, proof="p" * 40)
-    with pytest.raises(captcha.CaptchaRequired):
-        await _setup(factory, token, proof=await captcha_proof("company_login"))
-    assert created == []
+async def test_a_dummy_proof_still_creates_the_firebase_user(world) -> None:
+    factory, token, email, _user_id, created = world
+    _response, out = await _setup(factory, token, proof="not-a-real-proof")
+    assert created == [(email, PASSWORD, "Asha Rao")]
+    assert out.user.role == Role.recruiter
 
 
 async def test_a_weak_password_is_refused_before_anything(world) -> None:

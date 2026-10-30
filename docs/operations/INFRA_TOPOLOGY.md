@@ -110,4 +110,5 @@ logs, each pinned to its constant by a test:
 | `judge0_enabled`, `judge0_instance_enabled`, `judge0_clients_enabled` | false | nothing is provisioned; removed with the sandbox module |
 | `transcribe_enabled` | false until the deploy stage's apply | spoken answers are not offered while false |
 | `INBOUND_EMAIL_DOMAIN` | empty | the region does not receive SES mail; reply threading is inert |
-| `DEMO_MODE` | off | Public demo mode is off unless an operator sets `DEMO_MODE`. On `ENVIRONMENT=production`, `DEMO_MODE` also requires `DEMO_MODE_CONFIRM=public-demo`. This row is not a live switch. [DEMO_MODE.md](DEMO_MODE.md) |
+
+`DEMO_MODE` is not one of the switches above. As of 2026-10-30 the pilot API task definition `readypick-pilot-api:55` sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image `readypick-pilot-frontend:45` (tag `sha-d51149b0b0bf`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. The code default is off. tfvars were not changed and must not say `demo_mode=true`. The CAPTCHA removal is not deployed yet. [DEMO_MODE.md](DEMO_MODE.md)

@@ -20,7 +20,6 @@ import { Loader2, MailCheck } from "lucide-react";
 
 import { apiPost } from "@/lib/api";
 import { friendlyAuthError } from "@/lib/firebase-session";
-import { Captcha, type CaptchaHandle } from "@/components/captcha";
 import { InlineError } from "@/components/page-primitives";
 import {
   PasswordRules,
@@ -73,7 +72,6 @@ export function ForgotPassword({
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const captcha = React.useRef<CaptchaHandle>(null);
   const rules = passwordRules(password);
 
   const toggle = (next: boolean) => {
@@ -118,10 +116,8 @@ export function ForgotPassword({
       return;
     }
     run(async () => {
-      const proof = await captcha.current!.prove();
       const sent = await apiPost<{ message: string }>("/auth/password-reset/request", {
         email: address,
-        captcha_proof: proof,
       });
       setNotice(sent.message || RESET_SENT_MESSAGE);
       setStep("code");
@@ -184,7 +180,6 @@ export function ForgotPassword({
               onKeyDown={onEnter(requestCode)}
             />
           </div>
-          <Captcha ref={captcha} purpose="password_reset" disabled={busy} idPrefix={`${idPrefix}-reset-captcha`} />
           <Button type="button" size="sm" disabled={busy} onClick={requestCode}>
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : null}
             Email me a security code

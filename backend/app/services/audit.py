@@ -47,9 +47,9 @@ AUTH_LOGOUT = "logout"
 AUTH_EMAIL_SEND_FAILED = "email_send_failed"
 AUTH_OWNER_INVARIANT_VIOLATION = "owner_invariant_violation"
 #: Auth hardening, 2026-09-29 (auth spec section 29). None of these rows ever
-#: carries the answer, the code, a proof, a token or a password: the metadata
-#: names the PURPOSE or the FLOW and nothing a caller typed.
-AUTH_CAPTCHA_CHALLENGE_FAILED = "captcha_challenge_failed"
+#: carries the code, a token or a password: the metadata names the FLOW and
+#: nothing a caller typed. The challenge-failed action was retired with the
+#: server-drawn check (A-24, 2026-10-30).
 AUTH_PASSWORD_CHANGE_CODE_SENT = "password_change_code_sent"
 AUTH_PASSWORD_CHANGED = "password_changed"
 AUTH_STAFF_INVITE_ACCEPTED = "staff_invite_accepted"
@@ -68,7 +68,6 @@ AUTH_ACTIONS: frozenset[str] = frozenset(
         AUTH_LOGOUT,
         AUTH_EMAIL_SEND_FAILED,
         AUTH_OWNER_INVARIANT_VIOLATION,
-        AUTH_CAPTCHA_CHALLENGE_FAILED,
         AUTH_PASSWORD_CHANGE_CODE_SENT,
         AUTH_PASSWORD_CHANGED,
         AUTH_STAFF_INVITE_ACCEPTED,

@@ -102,7 +102,7 @@ export const viewport: Viewport = {
     // status bar paints a different product above the page. These two were the
     // pre-navy palette and had been stale since the recolour.
     { media: "(prefers-color-scheme: light)", color: "#F6F2EB" },
-    { media: "(prefers-color-scheme: dark)", color: "#030C16" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
   ],
   width: "device-width",
   initialScale: 1,

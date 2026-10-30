@@ -45,7 +45,8 @@ class RegistrationIn(BaseModel):
     company_name: str = Field(max_length=255)
     industry: Industry
     industry_other: str | None = Field(default=None, max_length=100)
-    captcha_proof: str = Field(min_length=1, max_length=128)
+    #: Accepted and not read (A-24). An older page may still send it.
+    captcha_proof: str | None = Field(default=None, max_length=128)
 
     @field_validator("first_name")
     @classmethod

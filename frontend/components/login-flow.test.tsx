@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
-// The sign-in pages (auth spec 6.4, 7). Pinned: the company page offers no
-// Google and sends a `company_login` proof; the candidate page offers Google
-// and sends `candidate_login`; the security check is verified BEFORE Firebase
-// is asked; and the exchange carries the proof and its purpose.
+// The sign-in pages. Pinned: the company page offers no Google and names
+// `company_login`; the candidate page offers Google and names
+// `candidate_login`; the exchange carries the surface and no proof.
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -40,10 +39,6 @@ const order: string[] = [];
 function serve() {
   http.apiPost.mockImplementation(async (path: string) => {
     order.push(path);
-    if (path === "/auth/captcha/challenge") {
-      return { challenge_id: "c1", image: "data:image/svg+xml;base64,PHN2Zy8+", expires_in: 300 };
-    }
-    if (path === "/auth/captcha/verify") return { captcha_proof: "proof-1" };
     if (path === "/auth/firebase/session") {
       return { user: { id: "u1", role: "recruiter" }, capabilities: [] };
     }
@@ -65,25 +60,21 @@ afterEach(() => {
 async function signIn() {
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "a@b.test" } });
   fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret-123" } });
-  fireEvent.change(screen.getByLabelText("Security check"), { target: { value: "k7m2px" } });
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(auth.setSession).toHaveBeenCalled());
 }
 
 describe("the company sign-in page", () => {
-  it("offers no Google and signs in with a company_login proof", async () => {
+  it("offers no Google and signs in with a company_login surface", async () => {
     serve();
     render(<LoginFlow surface="company" title="Sign in to your company workspace" />);
-    await screen.findByAltText(/security check characters/i);
     expect(screen.queryByRole("button", { name: /google/i })).toBeNull();
-    expect(http.apiPost).toHaveBeenCalledWith("/auth/captcha/challenge", { purpose: "company_login" });
+    expect(screen.queryByLabelText("Security check")).toBeNull();
 
     await signIn();
-    // The check is verified before Firebase is asked for anything.
-    expect(order.indexOf("/auth/captcha/verify")).toBeLessThan(order.indexOf("firebase"));
+    expect(order.indexOf("firebase")).toBeLessThan(order.indexOf("/auth/firebase/session"));
     expect(http.apiPost).toHaveBeenCalledWith("/auth/firebase/session", {
       id_token: "id-token",
-      captcha_proof: "proof-1",
       captcha_purpose: "company_login",
     });
     expect(navigation.replace).toHaveBeenCalledWith("/org");
@@ -91,10 +82,10 @@ describe("the company sign-in page", () => {
 });
 
 describe("the candidate sign-in page", () => {
-  it("offers Google, links to the company page, and signs in with a candidate_login proof", async () => {
+  it("offers Google, links to the company page, and signs in with a candidate_login surface", async () => {
     serve();
     render(<LoginPageFlow />);
-    await screen.findByAltText(/security check characters/i);
+    expect(screen.queryByLabelText("Security check")).toBeNull();
     expect(screen.getByRole("button", { name: /continue with google/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Company login" }).getAttribute("href")).toBe(
       "/company/login",
@@ -106,20 +97,26 @@ describe("the candidate sign-in page", () => {
     );
   });
 
-  it("asks for the security check before opening the Google popup", async () => {
+  it("opens Google from the click, with no security check", async () => {
     serve();
+    firebaseSdk.signInWithPopup.mockImplementation(async () => {
+      order.push("popup");
+      return { user: { getIdToken: async () => "id-token" } };
+    });
     render(<LoginPageFlow />);
-    await screen.findByAltText(/security check characters/i);
     fireEvent.click(screen.getByRole("button", { name: /continue with google/i }));
-    expect(await screen.findByText(/type the characters shown/i)).toBeTruthy();
-    expect(firebaseSdk.signInWithPopup).not.toHaveBeenCalled();
+    await waitFor(() => expect(firebaseSdk.signInWithPopup).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Security check")).toBeNull();
   });
 
   it("uses the Provider purpose behind ?portal=owner", async () => {
     serve();
     navigation.params = new URLSearchParams("portal=owner");
     render(<LoginPageFlow />);
-    await screen.findByAltText(/security check characters/i);
-    expect(http.apiPost).toHaveBeenCalledWith("/auth/captcha/challenge", { purpose: "provider_login" });
+    await signIn();
+    expect(http.apiPost).toHaveBeenCalledWith("/auth/firebase/session", {
+      id_token: "id-token",
+      captcha_purpose: "provider_login",
+    });
   });
 });

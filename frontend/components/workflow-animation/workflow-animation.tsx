@@ -60,7 +60,7 @@ export function WorkflowAnimation() {
 
   return (
     <div ref={viewportRef} className="relative">
-      <div className="overflow-hidden rounded-none border border-white/10 bg-[#050610] p-2 sm:p-3">
+      <div className="overflow-hidden rounded-none border border-white/10 bg-black p-2 sm:p-3">
         {/* A FIXED height below `sm`, never an aspect ratio with a minimum
             height: `aspect-[16/10] min-h-[340px]` made the box 544px WIDE on
             a 390px phone (the minimum height drags the width up through the

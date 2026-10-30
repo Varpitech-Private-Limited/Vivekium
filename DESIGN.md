@@ -53,8 +53,13 @@ They are not brand colours.
 - Interactive boundaries may use a darker palette token when `#DDD6CB` would
   fall below WCAG 1.4.11. This is an accessibility adaptation, not a new hue.
 
-The optional dark theme is a navy inversion of the same semantic system. It
-does not introduce a new brand hue. Light mode is the reference presentation.
+The optional dark theme is a black field, not a navy inversion. The page is
+`#000000`. Cards, menus and the sidebar use a near-black neutral surface so
+layers stay separable. Text is `#FFFFFF`. Primary buttons are `#FFFFFF` with
+black labels. Secondary actions keep a black fill, white text and a visible
+border. Teal remains evidence. The code editor keeps a navy keyword and a teal
+literal so syntax stays readable; that blue is not page chrome. Light mode is
+the reference presentation and keeps navy as structure.
 
 ## 3. Brand mark
 
@@ -95,8 +100,10 @@ Use semantic type roles from `frontend/tailwind.config.ts` and
 
 ### Buttons
 
-Primary buttons use navy with white text. Secondary buttons use a warm surface,
-navy text and a visible border. Teal is not a generic call-to-action colour.
+Primary buttons use navy with white text in light mode, and white with black
+text in dark mode. Secondary buttons use a warm surface, navy text and a
+visible border in light mode; in dark mode they use a black fill, white text
+and a visible border. Teal is not a generic call-to-action colour.
 Every state keeps a visible focus ring and a minimum 44 pixel touch target where
 the surrounding layout permits it.
 

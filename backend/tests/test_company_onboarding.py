@@ -1,7 +1,7 @@
 """Company self-registration, end to end over the REAL routes (owner spec 34.2).
 
-Real Postgres, real Redis, a real CAPTCHA proof minted by the production path
-(`tests/captcha_support`), the real session exchange for the sign-in refusal.
+Real Postgres, real Redis, the real session exchange for the sign-in refusal.
+A registration body does not need a proof.
 Doubled only at the vendor seams: Razorpay's Orders API (`create_order`), its
 key configuration (so a signature can be computed the way Razorpay computes
 it), and Firebase's Admin API (`create_password_user`, `verify_id_token`).
@@ -39,7 +39,6 @@ from app.schemas.auth import FirebaseSessionIn
 from app.services import company_onboarding, firebase_auth, razorpay, security_codes
 from app.services.firebase_auth import FirebaseIdentity
 from app.workers import dispatch
-from tests.captcha_support import captcha_proof
 
 BASE = "/api/v1/company-onboarding"
 KEY_SECRET = "rzp-onboarding-test-secret"
@@ -69,10 +68,7 @@ class World:
         return body
 
     async def register(self, **overrides) -> httpx.Response:
-        body = self.form(**overrides)
-        if "captcha_proof" not in body:
-            body["captcha_proof"] = await captcha_proof("company_register")
-        return await self.http.post(f"{BASE}/register", json=body)
+        return await self.http.post(f"{BASE}/register", json=self.form(**overrides))
 
     def last_code(self) -> str:
         sent = [
@@ -207,13 +203,14 @@ def _set_cookie_names(response: httpx.Response) -> list[str]:
 
 # ── The form and the security code ──────────────────────────────────────────
 
-async def test_register_needs_a_company_register_captcha_proof(world) -> None:
-    for proof in ("p" * 40, await captcha_proof("company_login")):
-        response = await world.register(captcha_proof=proof)
-        assert response.status_code == 400
-    assert not [d for d in dispatch.recorded() if d.name == "pickready.send_security_email"]
-    registration, _tenant, _user = await world.rows()
-    assert registration is None
+async def test_register_accepts_a_missing_proof(world) -> None:
+    response = await world.register()
+    assert response.status_code == 202
+
+
+async def test_register_accepts_a_dummy_proof(world) -> None:
+    response = await world.register(captcha_proof="not-a-proof")
+    assert response.status_code == 202
 
 
 async def test_a_right_code_creates_an_onboarding_company_and_an_invited_super_admin(world) -> None:
@@ -360,7 +357,6 @@ async def _exchange(world, monkeypatch, uid: str):
     monkeypatch.setattr(firebase_auth, "verify_id_token", lambda _tok: identity)
     body = FirebaseSessionIn(
         id_token="t" * 40,
-        captcha_proof=await captcha_proof("company_login"),
         captcha_purpose="company_login",
     )
     from fastapi import Response

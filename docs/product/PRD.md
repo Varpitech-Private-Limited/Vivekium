@@ -1,6 +1,6 @@
 # Vivekium Product Requirements
 
-**Status:** current. **Reviewed:** 2026-10-14 against the decision register, the specifications in [../spec/](../spec/) and the code names they cite. Sections marked **decided, pending** state an owner ruling that is not built yet.
+**Status:** current. **Reviewed:** 2026-10-14 against the decision register, the specifications in [../spec/](../spec/) and the code names they cite. **Updated:** 2026-10-30 (A-24). Sections marked **decided, pending** state an owner ruling that is not built yet.
 **Authority:** the latest dated owner statement ([../decisions/REGISTER.md](../decisions/REGISTER.md)), then the RBAC specification and the Runbook, then [../spec/](../spec/). Where the running product differs from a specification the code shows what exists and the register's Pending changes say what is owed. Removed behaviour is recorded in [../history/](../history/).
 
 ## 1. What the product is
@@ -135,7 +135,7 @@ Personal and social leads share one lead model with six milestones (three intera
 
 ## 14. Authentication and the public site
 
-Google or email and password through Firebase; the backend exchanges the verified identity for secure session cookies that die with the browser, with a 30-minute idle deadline moved only by real activity. Every auth surface takes a server-checked CAPTCHA. Company registration and password reset or change use a security code, not a login OTP. Google never signs in a company role; staff are invite-only. Sign-in asks for no workspace; the backend routes by the account's own record.
+Google or email and password through Firebase; the backend exchanges the verified identity for secure session cookies that die with the browser, with a 30-minute idle deadline moved only by real activity. No auth surface draws or checks a server CAPTCHA (A-24, 2026-10-30). `captcha_purpose` on the session exchange is only the portal filter. `captcha_proof` may still be sent by an old client and is not read. The removal is not deployed yet. Company registration and password reset or change use a security code, not a login OTP. Google never signs in a company role; staff are invite-only. Sign-in asks for no workspace; the backend routes by the account's own record.
 
 ## 15. Quality requirements
 

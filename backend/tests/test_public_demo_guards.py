@@ -36,11 +36,9 @@ from app.models.invite import StaffInvite, hash_invite_token, invite_expiry
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.services import credits, demo_access, firebase_auth, razorpay
-from app.services.captcha import CAPTCHA_REQUIRED_DETAIL
 from app.services.password_policy import PASSWORD_RULE_DETAIL
-from tests.captcha_support import captcha_proof
 
-# InviteSetupPasswordIn rejects a proof shorter than 16 before the handler.
+# A proof is accepted and not read. A short value must not be a validation error.
 DUMMY_PROOF = "x" * 16
 SHORT_PASSWORD = "short"
 PASSWORD = "Join-The-Team-7"
@@ -381,44 +379,35 @@ async def test_public_demo_invite_accepts_a_dummy_proof_and_a_short_password(wor
     assert state["status"] == UserStatus.active
 
 
-async def test_a_real_invite_rejects_the_dummy_proof_while_demo_mode_is_on(world, monkeypatch) -> None:
-    """The password would pass today's rule, so the refusal is the proof."""
+async def test_a_real_invite_accepts_a_dummy_proof_while_demo_mode_is_on(world, monkeypatch) -> None:
+    """Demo mode does not skip the password rule on a real company."""
     _demo_settings(monkeypatch, mode=True)
     assert demo_access.enabled() is True
     await world.add_invite(public_demo=False)
 
     response = await world.setup(password=PASSWORD, proof=DUMMY_PROOF)
 
-    assert response.status_code == 400, response.text
-    assert response.json()["detail"] == CAPTCHA_REQUIRED_DETAIL
-    assert world.firebase_calls == []
+    assert response.status_code == 200, response.text
+    assert world.firebase_calls == [(world.email, PASSWORD, "Asha Rao")]
     state = await world.user_state()
     assert state["public_demo"] is False
-    assert state["firebase_uid"] is None
-    assert state["status"] == UserStatus.invited
+    assert state["status"] == UserStatus.active
+    assert state["firebase_uid"] is not None
+    assert state["firebase_uid"].startswith("fbuid-")
 
 
-async def test_demo_mode_off_requires_policy_and_captcha_before_invite_success(world, monkeypatch) -> None:
-    """A public_demo tenant still walks today's gates while the flag is off."""
+async def test_demo_mode_off_still_requires_the_password_rule(world, monkeypatch) -> None:
+    """A public_demo tenant still walks the password rule while the flag is off."""
     _demo_settings(monkeypatch, mode=False)
     assert demo_access.enabled() is False
     await world.add_invite(public_demo=True)
 
-    weak = await world.setup(password=SHORT_PASSWORD, proof=await captcha_proof("invite_join"))
+    weak = await world.setup(password=SHORT_PASSWORD, proof=DUMMY_PROOF)
     assert weak.status_code == 422, weak.text
     assert weak.json()["detail"] == PASSWORD_RULE_DETAIL
     assert world.firebase_calls == []
 
-    unproven = await world.setup(password=PASSWORD, proof=DUMMY_PROOF)
-    assert unproven.status_code == 400, unproven.text
-    assert unproven.json()["detail"] == CAPTCHA_REQUIRED_DETAIL
-    assert world.firebase_calls == []
-    held = await world.user_state()
-    assert held["status"] == UserStatus.invited
-    assert held["public_demo"] is False
-    assert held["firebase_uid"] is None
-
-    ready = await world.setup(password=PASSWORD, proof=await captcha_proof("invite_join"))
+    ready = await world.setup(password=PASSWORD, proof=DUMMY_PROOF)
     assert ready.status_code == 200, ready.text
     assert world.firebase_calls == [(world.email, PASSWORD, "Asha Rao")]
     state = await world.user_state()

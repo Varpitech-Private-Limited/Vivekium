@@ -19,7 +19,7 @@ export function DemoWindow({
   compact?: boolean;
 }) {
   return (
-    <div className="h-full overflow-hidden rounded-none border border-white/10 bg-[#090b16] text-white">
+    <div className="h-full overflow-hidden rounded-none border border-white/10 bg-black text-white">
       <div className="flex h-9 items-center gap-2 border-b border-white/10 bg-white/[0.035] px-4">
         <span className="h-2.5 w-2.5 rounded-full bg-rose-400/80" />
         <span className="h-2.5 w-2.5 rounded-full bg-amber-300/80" />
@@ -125,11 +125,13 @@ export function GlowButton({
       }}
       transition={{ duration: success ? 0.8 : 1.8, repeat: success ? 0 : Infinity }}
       className={cn(
-        "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-semibold text-white",
+        "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-semibold",
         success
-          ? "bg-emerald-500"
-          // Single hue, navy. See DESIGN.md §2 rule 2.
-          : "bg-gradient-to-r from-navy-600 to-navy-400"
+          ? "bg-emerald-500 text-white"
+          // The frame is black in both themes, so the action is the dark-mode
+          // primary: white fill, black label. A navy ramp would invert to a
+          // white-to-blue wash once the theme tokens flip.
+          : "bg-white text-black"
       )}
     >
       {children}
