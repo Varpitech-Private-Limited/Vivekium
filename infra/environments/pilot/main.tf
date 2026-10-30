@@ -1582,11 +1582,13 @@ module "ecs" {
       cpu           = 2048
       memory        = 8192
       # Fargate on-demand vCPU quota in ap-south-2 is 2 (L-3032A538).
-      # This task is 2 vCPU. With the API and frontend also placed, a desired
-      # count of 1 cannot start and the API stays at 0 running tasks.
-      # Scaled to 0 on 2026-10-30 so the API could place. Leave it at 0
-      # until that quota is raised. Do not set this back to local.service_count.
-      desired_count = 0
+      # This task is 2 vCPU. A desired count of 1 cannot place beside the API
+      # and the frontend, so on 2026-10-30 the running service was set to 0
+      # with the AWS CLI. This value stays at local.service_count: the ECS
+      # module rejects a standing service whose desired count is 0, and
+      # ignore_changes on desired_count keeps the CLI value across apply.
+      # Do not raise the running count until that quota is raised.
+      desired_count = local.service_count
       # Two, not four: each analysis task is 2 vCPU / 8 GB, the costliest
       # step in the cluster, and its workload (fifteen-second audio chunks)
       # has never occurred in this environment.

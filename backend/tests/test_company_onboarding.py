@@ -425,7 +425,7 @@ def test_onboarding_uses_its_own_monthly_payment_routes() -> None:
     assert "/billing/" not in code
     paths = {route.path for route in onboarding_api.router.routes}
     assert paths == {
-        "/register", "/code/resend", "/code/verify", "/state",
+        "/register", "/demo", "/code/resend", "/code/verify", "/state",
         "/monthly/plans", "/monthly/subscribe", "/monthly/verify", "/activate",
     }
     assert "monthly_plans.begin_subscription" in code
