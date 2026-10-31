@@ -586,3 +586,42 @@ registering the prior immutable image URIs as new task-definition revisions,
 rolling the API and frontend services, updating the three image-backed Lambda
 functions to `sha-7dcd4e2b2e00-fn`, then repeating migration, smoke, and digest
 verification.
+
+## 2026-10-31 public demo release A-25 (pilot)
+
+Commit `b93dec77c274` (merge of PR #23). Images built locally for arm64 because
+every CodeBuild concurrency quota in the account is 0. Backend
+`sha-b93dec77c274` and `-fn` share digest
+`sha256:d3a38d7566ee871c2268c7cb8fc785c21f91777f1779ebe2f7af75c528c5853f`.
+Frontend (`NEXT_PUBLIC_DEMO_MODE=true`) digest
+`sha256:8831d96ffb888ba90089b45db3d26e03b6f360b231e70c4a07155beda511166c`.
+
+- Migration task `readypick-pilot-migrate:53` exited 0 (no new revision).
+- API `readypick-pilot-api:57` and frontend `readypick-pilot-frontend:47`
+  cloned from `:56` and `:46` with the same environment; running tasks report
+  the digests above and are healthy.
+- Lambdas `readypick-task-worker`, `readypick-jd-gen` and
+  `readypick-company-profile` run `sha-b93dec77c274-fn`; `DEMO_MODE=true` kept.
+- IAM, applied with the AWS CLI and mirrored in `infra/environments/pilot/main.tf`
+  (Terraform state has not applied them): `ses:SendRawEmail` on the
+  `readypick-pilot` configuration set for the API and worker roles, and the
+  worker may invoke `readypick-assessment-trigger`. The policy simulator reports
+  `allowed` for all three.
+- A password-reset request for the owner address logged
+  `security_email.sent template=security_code_password` and the task succeeded
+  on attempt 1. Inbox arrival was not observed by this record.
+- Acceptance script `tmp/e2e_acceptance.py` against https://readypick.ai:
+  15 of 15 checks passed (persistent candidate, company and BD users across
+  different passwords, job and lead persistence, demo purchase 1500 to 6000
+  subunits, demo users refused on owner endpoints, owner email refused through
+  demo login, BD agreement and email change refused).
+- Data reset: snapshot `readypick-pilot-pre-demo-reset-20261031` taken first;
+  six sample companies, their users and jobs, and the BD leads were removed.
+  The provider, two BD accounts and four candidate identity rows remain.
+
+Rollback: backend and frontend tag `sha-cdf9b73d358a` (task definitions `:56`
+and `:46`); Lambdas `sha-cdf9b73d358a-fn`.
+
+Not verified: Terraform apply (the plan carries unrelated unapplied drift),
+inbox arrival of mail, and the full workflow audit (resume matching, assessment
+and report generation, interviews) on the live site.
