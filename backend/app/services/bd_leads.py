@@ -311,11 +311,15 @@ async def _create_tenant_from_lead(session: AsyncSession, lead: BDLead) -> Tenan
 
 # ── The BD Customers page ────────────────────────────────────────────────────
 
-def customer_predicates(*, search: str | None = None) -> list:
+def customer_predicates(
+    *, search: str | None = None, owner_user_id: uuid.UUID | None = None
+) -> list:
     """A customer is a lead whose agreement was signed. Archived leads are
     excluded: archiving a lead hides the whole relationship, and a hidden lead
     reappearing on the Customers page would be a surprising leak."""
     predicates = [BDLead.agreement.is_(True), BDLead.archived_at.is_(None)]
+    if owner_user_id is not None:
+        predicates.append(BDLead.owner_user_id == owner_user_id)
     needle = (search or "").strip()
     if needle:
         pattern = f"%{needle}%"

@@ -865,10 +865,16 @@ data "aws_iam_policy_document" "ses_send" {
   # that support it. The sending domain is not a fixed literal -- a corporate
   # sender's own domain is verified dynamically -- so the identity NAME stays
   # wildcarded while the partition, service, region and account do not.
+  # The configuration set is a second resource SES authorises a send against:
+  # every send names it (SES_CONFIGURATION_SET), and an identity-only grant is
+  # an implicit deny, so no mail left the platform.
   statement {
-    sid       = "SendRawEmail"
-    actions   = ["ses:SendRawEmail"]
-    resources = ["arn:aws:ses:${var.region}:${var.account_id}:identity/*"]
+    sid     = "SendRawEmail"
+    actions = ["ses:SendRawEmail"]
+    resources = [
+      "arn:aws:ses:${var.region}:${var.account_id}:identity/*",
+      "arn:aws:ses:${var.region}:${var.account_id}:configuration-set/${aws_sesv2_configuration_set.this.configuration_set_name}",
+    ]
   }
 
   statement {
@@ -1578,9 +1584,9 @@ module "ecs" {
     # group, no listener rule, reachable only at its Cloud Map name from inside
     # the ECS security group.
     analysis = {
-      image         = "${module.ecr.repository_urls["analysis"]}:${local.analysis_image_tag}"
-      cpu           = 2048
-      memory        = 8192
+      image  = "${module.ecr.repository_urls["analysis"]}:${local.analysis_image_tag}"
+      cpu    = 2048
+      memory = 8192
       # Fargate on-demand vCPU quota in ap-south-2 is 2 (L-3032A538).
       # This task is 2 vCPU. A desired count of 1 cannot place beside the API
       # and the frontend, so on 2026-10-30 the running service was set to 0
@@ -1687,7 +1693,10 @@ module "lambda" {
       # AccessDeniedException because no earlier sweep had ever needed the
       # grant -- every previous one dispatched to Route.ECS, which goes through
       # ecs:RunTask and is a different permission.
-      invokable_function_keys = ["task-worker"]
+      # `assessment-trigger` too: a sweep that re-dispatches Route.ECS work
+      # (process_candidate_project, generate_proctoring_report) invokes it, and
+      # without the grant every hourly reconcile failed with AccessDenied.
+      invokable_function_keys = ["task-worker", "assessment-trigger"]
       memory_mb               = 1024
       # Ten minutes. The binding case is a delivery task backing off sixty
       # seconds between attempts; the retry loop refuses an attempt that cannot
@@ -2057,13 +2066,6 @@ module "scheduler" {
     # Terraform half of the entry in app/workers/schedule.py.
     "readypick-expire-credit-lots" = {
       task            = "pickready.expire_credit_lots"
-      rate_expression = "rate(1440 minutes)"
-    }
-    # Public demo retention. The Terraform half of the entry in
-    # app/workers/schedule.py. Deletes expired public_demo tenants and
-    # candidate users only.
-    "readypick-purge-public-demo" = {
-      task            = "pickready.purge_public_demo"
       rate_expression = "rate(1440 minutes)"
     }
     # Phase 6 WP6-C. The Terraform half of the entry in

@@ -63,3 +63,10 @@ Sections of `docs/product/PRD.md` and `docs/architecture/ESD.md` that described 
 - **Why obsolete:** the owner supplied a definitive Vivekium HTML palette on 2026-10-17 and requested one current design contract. The product now uses the directional-chevron mark, warm paper palette and the already-approved Fraunces/Outfit typography.
 - **Replaced by:** root [../../DESIGN.md](../../DESIGN.md), implemented by `frontend/app/globals.css`, `frontend/tailwind.config.ts` and `frontend/components/brand/logo.tsx`.
 - **Original:** `git show 7f6f214:DESIGN.md` retrieves the last pre-reference document.
+
+## J. Demo email allowlist and demo retention sweep (removed 2026-10-31)
+
+- **What:** `DEMO_EMAIL_ALLOWLIST` withheld every recipient not on it (message id `demo-withheld`), and the daily task `pickready.purge_public_demo` (rule `readypick-purge-public-demo`, `DEMO_RETENTION_DAYS`, default 14) deleted `public_demo` tenants and candidate users. Company login was retrieve-only and BD login was refused.
+- **Why obsolete:** owner statement of 2026-10-31 (register A-25). The withhold stopped every security code and every notification from reaching a real mailbox, and the sweep would have erased persistent demo accounts and their business records.
+- **Replaced by:** [../operations/DEMO_MODE.md](../operations/DEMO_MODE.md) and register A-25.
+- **Original:** `git show b222eff4:backend/app/services/demo_access.py` and `git show b222eff4:backend/app/workers/tasks_demo.py`.

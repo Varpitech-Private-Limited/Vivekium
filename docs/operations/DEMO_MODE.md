@@ -2,7 +2,7 @@
 
 **Status:** current. **Reviewed:** 2026-10-30 against the owner statements of that date (register A-23 and A-24). The behavior below is specified. The code default for the flag is off. As of 2026-10-30 the pilot task definition for the API (`readypick-pilot-api:56`) sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image (`readypick-pilot-frontend:46`, tag `sha-cdf9b73d358a`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. tfvars were not changed and must not say `demo_mode=true`. The CAPTCHA removal (A-24) is deployed on `readypick-pilot-api:56` and `readypick-pilot-frontend:46`. September 2026 account cost was about $116.60 unblended, including tax, measured from Cost Explorer for account 016617990245. October was still estimated and is not a bill.
 
-A-23 amends A-05 only while `DEMO_MODE` is on. A-24 removed the server-drawn CAPTCHA from every auth surface, including when the flag is off. Register: [../decisions/REGISTER.md](../decisions/REGISTER.md). What runs on AWS: [INFRA_TOPOLOGY.md](INFRA_TOPOLOGY.md). Image rollback: [DEPLOY_AWS.md](DEPLOY_AWS.md) section 7.
+A-23 amends A-05 only while `DEMO_MODE` is on. A-25 (2026-10-31) makes demo users persistent and demo mail real. A-24 removed the server-drawn CAPTCHA from every auth surface, including when the flag is off. Register: [../decisions/REGISTER.md](../decisions/REGISTER.md). What runs on AWS: [INFRA_TOPOLOGY.md](INFRA_TOPOLOGY.md). Image rollback: [DEPLOY_AWS.md](DEPLOY_AWS.md) section 7.
 
 `public_demo` is a new column (migration head `0137_public_demo`). It is not `is_demo`. `is_demo` remains the C-07 billing-exemption flag.
 
@@ -32,9 +32,12 @@ Demo login (`POST /api/v1/auth/demo/session`) accepts any syntactically valid em
 
 | Action | Rule |
 |---|---|
-| Company login | Retrieves only. Does not create. |
+| Company login | Retrieves only. Does not create: a company user cannot exist without a tenant, so a new email registers below. |
 | Company registration (`POST /api/v1/company-onboarding/demo`) | Creates. |
 | Candidate login | Creates or retrieves. Must not claim a sourced candidate (`email_verified` false). |
+| BD login | Creates or retrieves a `bd` user with no tenant. Sees and edits only the leads it owns, has `use_ai_reach` switched off, and the owner audience gives it no route to the Super Admin console. |
+
+The same email and portal always resolves to the same user, whatever password is typed. An advisory lock per email and portal makes parallel first logins create one row. The same email may hold one user per portal. The provider portal is never reachable here.
 | Invite setup-password, `public_demo` branch | The existing `POST /api/v1/companies/invites/{token}/setup-password` handler (also mounted under `/api/v2`). The `public_demo` branch skips Firebase and Razorpay only when the flag is on. |
 
 `GET /api/v1/auth/demo-status` reports the flag. It does not mint a session.
@@ -61,19 +64,13 @@ Registration writes a `subscription_charge` of amount 0 and does not call Razorp
 
 No Razorpay call is not a fake balance. The ledger rows are real.
 
-## Email allowlist
+## Email
 
-When demo mode is on, a recipient who is not on `DEMO_EMAIL_ALLOWLIST` and is not a platform sender is withheld. The skip is recorded (message id `demo-withheld`). The workflow does not fail. An empty allowlist withholds everyone except platform addresses.
+Demo mode withholds nothing. Mail to any address goes through the deployment's one transport (SES in production), with delivery and failure recorded by the existing email log. A failed send never blocks a non-email feature. Sender authorization is unchanged: SES refuses an unverified From identity and the sender flow checks eligibility without creating identities (register A-25).
 
-This withhold runs only while demo mode is on.
+## Persistence
 
-## Cleanup sweep
-
-Daily task `pickready.purge_public_demo`. Schedule name `readypick-purge-public-demo`. It deletes only `public_demo` rows older than `DEMO_RETENTION_DAYS` (default 14). It never deletes `is_demo`-only tenants.
-
-The task belongs in `workers/schedule.py` and in every environment's scheduler. This page does not record a live scheduler change.
-
-The sweep is safe while the flag is off because it only deletes `public_demo` rows.
+Demo users, companies, candidates, assessments, reports, ledger rows and transactions persist. No application job expires or deletes them. A reset is a one-time, owner-confirmed operation and is never a scheduled task or part of a deploy.
 
 ## What stays real
 
@@ -88,7 +85,7 @@ AI agents, assessments, rankings, workers, row-level security and capabilities s
 
 ## Rollback
 
-Set `DEMO_MODE=false` on the API and on every worker that sends mail, and roll those tasks. The UI goes off only when the frontend image is rebuilt without `--public-demo` (`NEXT_PUBLIC_DEMO_MODE=false`, the Dockerfile default). A task environment variable does not change the UI. Columns can stay. The sweep can stay: while the flag is off it only deletes `public_demo` rows.
+Set `DEMO_MODE=false` on the API and on every worker that sends mail, and roll those tasks. The UI goes off only when the frontend image is rebuilt without `--public-demo` (`NEXT_PUBLIC_DEMO_MODE=false`, the Dockerfile default). A task environment variable does not change the UI. Columns and demo rows stay.
 
 Do not drop the `public_demo` columns on a database that may already hold demo rows unless a counted check shows that drop is safe. This page does not give that drop.
 

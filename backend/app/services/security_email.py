@@ -188,9 +188,6 @@ async def deliver(*, to: str, subject: str, html: str, text: str) -> str | None:
             "security email refused: EMAIL_TRANSPORT must be ses in "
             f"{environment}, and there is no SMTP fallback"
         )
-    from app.services.demo_access import ensure_withheld
-
-    ensure_withheld(to)
     if settings.email_transport == "ses":
         from app.services.ses_service import send_email_async as ses_send
 

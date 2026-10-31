@@ -1,4 +1,4 @@
-"""Guards around public demo purchase, invite setup, and outbound mail.
+"""Guards around public demo purchase and invite setup.
 
 The suite database is the one `get_settings().database_url` already names.
 Nothing here opens a second database, and the ledger is read from Postgres
@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sys
 import uuid
-from typing import get_args, get_origin
 
 import httpx
 import pytest
@@ -44,23 +43,6 @@ SHORT_PASSWORD = "short"
 PASSWORD = "Join-The-Team-7"
 PACK_SUBUNITS = STARTER_PACK_TOTAL_CREDITS * SUBUNITS_PER_CREDIT
 PURCHASE_PATH = "/api/v1/billing/demo/purchase"
-STRANGER = "stranger@example.net"
-
-
-def _is_list_type(annotation: object) -> bool:
-    if isinstance(annotation, str):
-        compact = annotation.replace(" ", "")
-        return compact.startswith("list[") or compact.startswith("set[")
-    if annotation in (list, set) or get_origin(annotation) in (list, set):
-        return True
-    return any(_is_list_type(arg) for arg in get_args(annotation))
-
-
-def _empty_allowlist(settings: object) -> str | list:
-    annotation = type(settings).model_fields["demo_email_allowlist"].annotation
-    if _is_list_type(annotation):
-        return []
-    return ""
 
 
 def _demo_settings(monkeypatch, *, mode: bool):
@@ -70,10 +52,7 @@ def _demo_settings(monkeypatch, *, mode: bool):
     function, so they read this object rather than a copy taken at import.
     """
     current = demo_access.get_settings()
-    updates: dict = {
-        "demo_mode": mode,
-        "demo_email_allowlist": _empty_allowlist(current),
-    }
+    updates: dict = {"demo_mode": mode}
     if "demo_mode_confirm" in type(current).model_fields:
         updates["demo_mode_confirm"] = "public-demo"
     settings = current.model_copy(update=updates)
@@ -416,18 +395,3 @@ async def test_demo_mode_off_still_requires_the_password_rule(world, monkeypatch
     assert state["firebase_uid"] is not None
     assert state["firebase_uid"].startswith("fbuid-")
     assert state["auth_providers"] == ["password"]
-
-
-def test_recipient_allowed_withholds_strangers_only_while_demo_mode_is_on(monkeypatch) -> None:
-    on = _demo_settings(monkeypatch, mode=True)
-    assert demo_access.enabled() is True
-    platform = on.platform_security_sender_email.strip()
-    assert "@" in platform
-    assert STRANGER.lower() != platform.lower()
-    assert demo_access.recipient_allowed(platform) is True
-    assert demo_access.recipient_allowed(STRANGER) is False
-
-    off = _demo_settings(monkeypatch, mode=False)
-    assert demo_access.enabled() is False
-    assert off.platform_security_sender_email.strip().lower() == platform.lower()
-    assert demo_access.recipient_allowed(STRANGER) is True
