@@ -475,7 +475,14 @@ async def update_agreement(
     tenant is archived, which is reversible, and re-signing reuses the same
     company rather than creating a second one.
     """
-    lead = await _load_lead(session, lead_id, await _own_scope(session, user))
+    scope = await _own_scope(session, user)
+    if scope is not None and body.agreement is True:
+        # Signing creates a real tenant; an open demo account must not.
+        raise HTTPException(
+            status_code=403,
+            detail="Signing an agreement is not available in the demo.",
+        )
+    lead = await _load_lead(session, lead_id, scope)
     outcome, tenant = await bd_leads.set_agreement(session, lead, body.agreement)
     if outcome != "unchanged":
         await audit(
@@ -610,6 +617,9 @@ async def update_bd_profile(
         raise HTTPException(status_code=404, detail="Account not found")
 
     changes = body.model_dump(exclude_unset=True)
+    if row.public_demo and changes.get("email", row.email) != row.email:
+        # The email is a demo account's identity, so it cannot move to another address.
+        raise HTTPException(status_code=403, detail="The demo email cannot be changed.")
     mapping = {"name": "full_name", "email": "email", "phone": "phone"}
     changed = []
     for field, value in changes.items():

@@ -494,6 +494,12 @@ async def test_demo_bd_user_sees_only_own_leads_and_cannot_use_ai_reach(world, m
         )
         assert reach.status_code == 403, reach.text
 
+        signed = await world.http.patch(
+            f"/api/v1/bd/leads/{mine}/agreement", json={"agreement": True}
+        )
+        assert signed.status_code == 403, signed.text
+        moved = await world.http.patch("/api/v1/bd/me", json={"email": _email(world, "moved")})
+        assert moved.status_code == 403, moved.text
         second = _email(world, "bdb")
         assert (await world.session(email=second, portal="bd")).status_code == 200
         other = await world.http.get("/api/v1/bd/leads")
