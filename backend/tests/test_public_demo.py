@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.api.company_onboarding import get_onboarding_db
+from app.core import db as app_db
 from app.core.config import get_settings
 from app.core.db import get_identity_session, superadmin_scope
 from app.main import app
@@ -254,6 +255,12 @@ async def world():
                 yield state
             finally:
                 await _wipe(factory, created, emails)
+                # The BD routes use the process-wide engine. Drop it so no pooled
+                # connection stays bound to this test's event loop for the next test.
+                if app_db._engine is not None:
+                    await app_db._engine.dispose()
+                app_db._engine = None
+                app_db._session_factory = None
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
