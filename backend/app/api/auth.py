@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import jwt as pyjwt
 from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -510,10 +510,12 @@ async def demo_session(
 ) -> SessionOut:
     """Open a public demo session for any nonempty password.
 
-    A real account, the owner, a permanent demo tenant, and every provider
-    or BD role are refused. Company sign-in retrieves a public demo company
-    and does not create one. Candidate sign-in creates a public demo
-    candidate only when no user already has that email.
+    A real account, the owner, and a permanent demo tenant are refused. The
+    provider portal is never reachable here. Candidate and BD sign-in create
+    or retrieve the one public-demo user for that email and portal. Company
+    sign-in retrieves a public-demo company and does not create one: a
+    company user cannot exist without a tenant, so a new email goes to
+    company registration.
     """
     demo_access.require_enabled()
     email = _normal_email(body.email)
@@ -521,35 +523,34 @@ async def demo_session(
     if _is_owner_email(email, settings.owner_email):
         raise HTTPException(status_code=403, detail=_DEMO_OWNER_REFUSED)
     portal = demo_access.PORTAL_TO_FILTER[body.portal]
-    if portal in {"owner", "bd"}:
+    if portal == "owner":
         raise HTTPException(
             status_code=403,
             detail=f"No {_PORTAL_LABEL[portal]} workspace is linked to this account",
         )
+    # Tenantless users have no unique key, so two parallel first logins would
+    # otherwise create two accounts. One first login at a time per email and portal.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"demo-session:{portal}:{email}"},
+    )
     rows = await _users_for_email(session, email)
     if any(not row.public_demo for row in rows):
         raise HTTPException(status_code=409, detail=_DEMO_EMAIL_REFUSED)
     allowed = PORTAL_ROLES[portal]
-    eligible = [
-        row for row in rows
-        if row.public_demo and row.role in allowed and row.status != UserStatus.disabled
-    ]
+    in_portal = [row for row in rows if row.public_demo and row.role in allowed]
+    eligible = [row for row in in_portal if row.status != UserStatus.disabled]
     if portal == "org":
         if not eligible:
             raise HTTPException(status_code=403, detail=_DEMO_COMPANY_MISSING)
         return await _open_demo_session(session, response, _prefer_client(eligible))
     if eligible:
         return await _open_demo_session(session, response, eligible[0])
-    if rows:
-        if any(row.public_demo and row.status == UserStatus.disabled for row in rows):
-            raise HTTPException(status_code=403, detail="Account unavailable")
-        raise HTTPException(
-            status_code=403,
-            detail=f"No {_PORTAL_LABEL[portal]} workspace is linked to this account",
-        )
+    if in_portal:
+        raise HTTPException(status_code=403, detail="Account unavailable")
     full_name = " ".join((body.full_name or "").split()) or None
     user = User(
-        role=Role.candidate,
+        role=Role.bd if portal == "bd" else Role.candidate,
         email=email,
         full_name=full_name,
         tenant_id=None,
@@ -557,6 +558,8 @@ async def demo_session(
         firebase_uid=None,
         auth_providers=["demo"],
         public_demo=True,
+        # A demo BD user may not send AI outreach mail from the platform.
+        permissions_json={"use_ai_reach": False} if portal == "bd" else None,
     )
     session.add(user)
     await session.flush()

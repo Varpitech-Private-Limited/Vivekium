@@ -1102,13 +1102,6 @@ module "scheduler" {
       task            = "pickready.expire_credit_lots"
       rate_expression = "rate(1440 minutes)"
     }
-    # Public demo retention. The Terraform half of the entry in
-    # app/workers/schedule.py. Deletes expired public_demo tenants and
-    # candidate users only.
-    "readypick-purge-public-demo" = {
-      task            = "pickready.purge_public_demo"
-      rate_expression = "rate(1440 minutes)"
-    }
     # Phase 6 WP6-C. The Terraform half of the entry in
     # app/workers/schedule.py; tests/test_schedule_parity.py fails on drift.
     # Re-dispatches candidate emails whose after-commit send was lost; never

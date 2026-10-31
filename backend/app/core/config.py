@@ -1151,8 +1151,6 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     demo_mode_confirm: str = ""
     demo_initial_credits: int = Field(default=25, ge=1, le=10000)
-    demo_email_allowlist: str = ""
-    demo_retention_days: int = Field(default=14, ge=1)
 
     @model_validator(mode="after")
     def _refuse_an_unconfigured_jwt_secret(self) -> "Settings":

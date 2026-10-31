@@ -163,15 +163,6 @@ async def _deliver_email(
     configured `smtp_from_email` address doubles as the platform's SES-verified
     default identity; the deployment must verify it in the SES account.
     """
-    from app.services.demo_access import ensure_withheld, recipient_allowed
-
-    if not recipient_allowed(to):
-        domain = ""
-        if "@" in (to or ""):
-            domain = to.rsplit("@", 1)[1].strip().lower()
-        logger.info("demo.email_withheld domain=%s", domain)
-        return "demo-withheld"
-    ensure_withheld(to)
     settings = get_settings()
     if settings.email_transport == "ses":
         from app.services.ses_service import send_email_async as ses_send
@@ -3148,7 +3139,6 @@ from app.workers import tasks_retrieval  # noqa: E402,F401
 # same way.
 from app.workers import tasks_security_email  # noqa: E402,F401
 # Public demo retention sweep. Registered by the same import rule.
-from app.workers import tasks_demo  # noqa: E402,F401
 # The Leadership Intelligence draft (2026-09-29, spec 17), registered the
 # same way.
 from app.workers import tasks_leadership  # noqa: E402,F401

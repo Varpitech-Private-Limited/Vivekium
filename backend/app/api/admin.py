@@ -373,6 +373,7 @@ async def create_bd_user(
             select(User).where(
                 User.tenant_id.is_(None),
                 User.role == Role.bd,
+                User.public_demo.is_(False),
                 func.lower(User.email) == email.strip().lower(),
             )
         )

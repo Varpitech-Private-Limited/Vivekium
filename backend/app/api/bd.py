@@ -186,9 +186,23 @@ def _lead_out(lead: BDLead, owner_name: str | None = None) -> LeadOut:
     )
 
 
-async def _load_lead(session: AsyncSession, lead_id: uuid.UUID) -> BDLead:
+async def _own_scope(session: AsyncSession, user: CurrentUser) -> uuid.UUID | None:
+    """A public-demo BD user reaches only the leads that user owns.
+
+    A demo account is open to anyone, so it must never read the real sales
+    pipeline or another visitor's leads. Every other BD user sees all leads.
+    """
+    is_demo = await session.scalar(
+        select(User.public_demo).where(User.id == user.user_id)
+    )
+    return user.user_id if is_demo else None
+
+
+async def _load_lead(
+    session: AsyncSession, lead_id: uuid.UUID, owner_scope: uuid.UUID | None = None
+) -> BDLead:
     lead = await session.get(BDLead, lead_id)
-    if lead is None:
+    if lead is None or (owner_scope is not None and lead.owner_user_id != owner_scope):
         raise HTTPException(status_code=404, detail="Lead not found")
     return lead
 
@@ -226,7 +240,7 @@ async def list_leads(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     session: AsyncSession = Depends(get_bd_db),
-    _user: CurrentUser = Depends(require_bd_capability(MANAGE_BD_LEADS)),
+    user: CurrentUser = Depends(require_bd_capability(MANAGE_BD_LEADS)),
 ) -> LeadListOut:
     """BD Reach, the one lead funnel.
 
@@ -269,6 +283,7 @@ async def list_leads(
         search=search,
         agreement=agreement_value,
         include_archived=include_archived,
+        owner_user_id=await _own_scope(session, user),
         agreement_is_set=agreement_is_set,
     )
     total = (
@@ -351,7 +366,7 @@ async def update_lead(
     `channel` is not editable: moving a lead between Personal Reach and Social
     Reach would either strip a real source or invent one.
     """
-    lead = await _load_lead(session, lead_id)
+    lead = await _load_lead(session, lead_id, await _own_scope(session, user))
     changes = body.model_dump(exclude_unset=True)
 
     if "social_source" in changes and lead.channel != CHANNEL_SOCIAL:
@@ -404,7 +419,7 @@ async def archive_lead(
     are hidden from the default list and from the Customers page, and reappear
     with `include_archived=true`.
     """
-    lead = await _load_lead(session, lead_id)
+    lead = await _load_lead(session, lead_id, await _own_scope(session, user))
     if lead.archived_at is None:
         lead.archived_at = datetime.now(timezone.utc)
         await session.flush()
@@ -428,7 +443,7 @@ async def update_progress(
     The body is a SPARSE map, so the UI sends only the box that was clicked and
     two reps working the same lead cannot overwrite each other's ticks.
     """
-    lead = await _load_lead(session, lead_id)
+    lead = await _load_lead(session, lead_id, await _own_scope(session, user))
     changed = bd_leads.apply_progress(lead, body.progress)
     await session.flush()
     if changed:
@@ -460,7 +475,14 @@ async def update_agreement(
     tenant is archived, which is reversible, and re-signing reuses the same
     company rather than creating a second one.
     """
-    lead = await _load_lead(session, lead_id)
+    scope = await _own_scope(session, user)
+    if scope is not None and body.agreement is True:
+        # Signing creates a real tenant; an open demo account must not.
+        raise HTTPException(
+            status_code=403,
+            detail="Signing an agreement is not available in the demo.",
+        )
+    lead = await _load_lead(session, lead_id, scope)
     outcome, tenant = await bd_leads.set_agreement(session, lead, body.agreement)
     if outcome != "unchanged":
         await audit(
@@ -481,9 +503,9 @@ async def update_agreement(
 
 async def _customer_rows(
     session: AsyncSession, search: str | None, page: int | None,
-    page_size: int | None,
+    page_size: int | None, owner_scope: uuid.UUID | None = None,
 ) -> list[BDLead]:
-    predicates = bd_leads.customer_predicates(search=search)
+    predicates = bd_leads.customer_predicates(search=search, owner_user_id=owner_scope)
     stmt = bd_leads.customer_list_query(predicates, page, page_size)
     return list((await session.execute(stmt)).scalars().all())
 
@@ -497,17 +519,18 @@ async def list_bd_customers(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     session: AsyncSession = Depends(get_bd_db),
-    _user: CurrentUser = Depends(require_bd_capability(VIEW_BD_CUSTOMERS)),
+    user: CurrentUser = Depends(require_bd_capability(VIEW_BD_CUSTOMERS)),
 ) -> BDCustomerListOut:
     """The customers database: every lead whose agreement was signed.
 
     Search and pagination run in SQL for the same reason the lead list does.
     """
-    predicates = bd_leads.customer_predicates(search=search)
+    scope = await _own_scope(session, user)
+    predicates = bd_leads.customer_predicates(search=search, owner_user_id=scope)
     total = (
         await session.execute(select(func.count(BDLead.id)).where(*predicates))
     ).scalar_one()
-    rows = await _customer_rows(session, search, page, page_size)
+    rows = await _customer_rows(session, search, page, page_size, scope)
     return BDCustomerListOut(
         customers=[bd_leads.customer_out(lead) for lead in rows],
         total=total,
@@ -520,7 +543,7 @@ async def list_bd_customers(
 async def export_bd_customers(
     search: str | None = Query(default=None),
     session: AsyncSession = Depends(get_bd_db),
-    _user: CurrentUser = Depends(require_bd_capability(VIEW_BD_CUSTOMERS)),
+    user: CurrentUser = Depends(require_bd_capability(VIEW_BD_CUSTOMERS)),
 ) -> StreamingResponse:
     """The same customer data as a CSV download, honouring the same filter.
 
@@ -533,7 +556,10 @@ async def export_bd_customers(
     Quoting is `csv.writer`'s, so a customer called "Acme, Inc." stays one
     field instead of silently becoming two columns.
     """
-    rows = await _customer_rows(session, search, page=1, page_size=MAX_EXPORT_ROWS)
+    rows = await _customer_rows(
+        session, search, page=1, page_size=MAX_EXPORT_ROWS,
+        owner_scope=await _own_scope(session, user),
+    )
     customers = [bd_leads.customer_out(lead) for lead in rows]
     filename = bd_leads.csv_filename()
     return StreamingResponse(
@@ -591,6 +617,9 @@ async def update_bd_profile(
         raise HTTPException(status_code=404, detail="Account not found")
 
     changes = body.model_dump(exclude_unset=True)
+    if row.public_demo and changes.get("email", row.email) != row.email:
+        # The email is a demo account's identity, so it cannot move to another address.
+        raise HTTPException(status_code=403, detail="The demo email cannot be changed.")
     mapping = {"name": "full_name", "email": "email", "phone": "phone"}
     changed = []
     for field, value in changes.items():

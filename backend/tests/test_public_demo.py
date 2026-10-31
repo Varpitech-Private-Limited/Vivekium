@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.api.company_onboarding import get_onboarding_db
+from app.core import db as app_db
 from app.core.config import get_settings
 from app.core.db import get_identity_session, superadmin_scope
 from app.main import app
@@ -41,7 +42,6 @@ def _demo_settings(monkeypatch, *, mode: bool):
     settings = current.model_copy(update={
         "demo_mode": mode,
         "demo_mode_confirm": "public-demo" if mode else "",
-        "demo_email_allowlist": "",
     })
     monkeypatch.setattr(demo_access, "get_settings", lambda bound=settings: bound)
     target = demo_access.enabled
@@ -255,6 +255,12 @@ async def world():
                 yield state
             finally:
                 await _wipe(factory, created, emails)
+                # The BD routes use the process-wide engine. Drop it so no pooled
+                # connection stays bound to this test's event loop for the next test.
+                if app_db._engine is not None:
+                    await app_db._engine.dispose()
+                app_db._engine = None
+                app_db._session_factory = None
     finally:
         app.dependency_overrides.clear()
         app.dependency_overrides.update(previous)
@@ -305,6 +311,42 @@ async def test_candidate_demo_session_creates_once_and_retrieves(world, monkeypa
     assert blank.status_code == 422
 
 
+async def test_bd_demo_session_creates_once_retrieves_and_has_no_owner_reach(world, monkeypatch) -> None:
+    _demo_settings(monkeypatch, mode=True)
+    email = _email(world, "bduser")
+    created = await world.session(email=email, portal="bd", password="first")
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["user"]["role"] == "bd"
+    assert body["user"]["tenant_id"] is None
+    rows = await world.user_by_email(email)
+    assert [row["role"] for row in rows] == [Role.bd]
+    assert rows[0]["public_demo"] is True and rows[0]["firebase_uid"] is None
+    # The session cookie is a BD session: the owner-only console stays shut.
+    owner_only = await world.http.get("/api/v1/admin/bd-users")
+    assert owner_only.status_code == 403
+    again = await world.session(email=email, portal="bd", password="second")
+    assert again.status_code == 200, again.text
+    assert again.json()["user"]["id"] == body["user"]["id"]
+    assert len(await world.user_by_email(email)) == 1
+
+
+async def test_one_email_is_one_user_per_portal_even_in_parallel(world, monkeypatch) -> None:
+    import asyncio
+
+    _demo_settings(monkeypatch, mode=True)
+    email = _email(world, "parallel")
+    results = await asyncio.gather(*[
+        world.session(email=email, portal="bd", password=f"p{n}") for n in range(5)
+    ])
+    assert [r.status_code for r in results] == [200] * 5, [r.text for r in results]
+    assert len({r.json()["user"]["id"] for r in results}) == 1
+    candidate = await world.session(email=email, portal="candidate", password="other")
+    assert candidate.status_code == 200, candidate.text
+    roles = sorted(row["role"].value for row in await world.user_by_email(email))
+    assert roles == ["bd", "candidate"]
+
+
 async def test_demo_session_refuses_owner_real_accounts_and_other_portals(world, monkeypatch) -> None:
     _demo_settings(monkeypatch, mode=True)
     owner = get_settings().owner_email
@@ -316,9 +358,6 @@ async def test_demo_session_refuses_owner_real_accounts_and_other_portals(world,
     provider = await world.session(email=_email(world, "prov"), portal="provider")
     assert provider.status_code == 403
     assert "workspace is linked" in provider.json()["detail"]
-    bd = await world.session(email=_email(world, "bd"), portal="bd")
-    assert bd.status_code == 403
-
     real = _email(world, "real")
     await world.add_user(email=real, role=Role.client, public_demo=False, tenant=True)
     clash = await world.session(email=real, portal="candidate")
@@ -430,3 +469,59 @@ async def test_company_registration_simulates_payment_and_retrieves(world, monke
     )
     assert clash.status_code == 409
     assert clash.json()["detail"] == REFUSED
+
+
+async def test_demo_bd_user_sees_only_own_leads_and_cannot_use_ai_reach(world, monkeypatch) -> None:
+    from app.models.bd import BDLead
+
+    _demo_settings(monkeypatch, mode=True)
+    real_id = uuid.uuid4()
+    async with world.factory() as session, session.begin():
+        async with superadmin_scope(session):
+            session.add(BDLead(
+                id=real_id, channel="personal", company_name="Real Pipeline Co",
+                owner_user_id=None,
+            ))
+    try:
+        first = _email(world, "bda")
+        assert (await world.session(email=first, portal="bd")).status_code == 200
+        created = await world.http.post(
+            "/api/v1/bd/leads", json={"channel": "personal", "company_name": "Mine Ltd"}
+        )
+        assert created.status_code == 201, created.text
+        mine = created.json()["id"]
+        listed = await world.http.get("/api/v1/bd/leads")
+        assert [lead["company_name"] for lead in listed.json()["leads"]] == ["Mine Ltd"]
+        assert (await world.http.patch(
+            f"/api/v1/bd/leads/{real_id}", json={"notes": "x"}
+        )).status_code == 404
+        reach = await world.http.post(
+            "/api/v1/bd/ai-reach/search",
+            json={"job_role": "Engineer", "city": "Pune", "industry": "Software"},
+        )
+        assert reach.status_code == 403, reach.text
+
+        signed = await world.http.patch(
+            f"/api/v1/bd/leads/{mine}/agreement", json={"agreement": True}
+        )
+        assert signed.status_code == 403, signed.text
+        moved = await world.http.patch("/api/v1/bd/me", json={"email": _email(world, "moved")})
+        assert moved.status_code == 403, moved.text
+        second = _email(world, "bdb")
+        assert (await world.session(email=second, portal="bd")).status_code == 200
+        other = await world.http.get("/api/v1/bd/leads")
+        assert other.json()["total"] == 0
+        assert (await world.http.patch(
+            f"/api/v1/bd/leads/{mine}", json={"notes": "x"}
+        )).status_code == 404
+        # The first user, signing in again with another password, still has the lead.
+        assert (await world.session(email=first, portal="bd", password="new")).status_code == 200
+        again = await world.http.get("/api/v1/bd/leads")
+        assert [lead["company_name"] for lead in again.json()["leads"]] == ["Mine Ltd"]
+    finally:
+        async with world.factory() as session, session.begin():
+            async with superadmin_scope(session):
+                await session.execute(
+                    text("DELETE FROM bd_leads WHERE id = :i OR company_name = 'Mine Ltd'"),
+                    {"i": real_id},
+                )

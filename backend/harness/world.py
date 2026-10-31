@@ -282,7 +282,9 @@ async def _seed_job(
     closed_at: datetime | None = None,
 ) -> uuid.UUID:
     job = uuid.uuid4()
-    start = ANCHOR - timedelta(days=2) if published else ANCHOR
+    # The posting window is checked against the real clock, so a fixed ANCHOR date
+    # expires: the published job 404'd for candidates once ANCHOR + 35 days passed.
+    start = datetime.now(timezone.utc) - timedelta(days=2) if published else ANCHOR
     await session.execute(
         sa.text(
             "INSERT INTO jobs (id, tenant_id, title, jd_json, jd_markdown, "
