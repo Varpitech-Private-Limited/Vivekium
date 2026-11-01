@@ -1195,6 +1195,25 @@ export interface ProctoringActivityRow {
  * specification forbids counts, timings and internal terms in the
  * recruiter's view. The only digits are clock times.
  */
+/**
+ * Mirrors `schemas/proctoring.ProctoringStateOut`: where one application's
+ * Proctoring Report stands, in the server's words. `message` is null for a
+ * finished report with complete monitoring.
+ */
+export type ProctoringStateName =
+  | "no_session"
+  | "in_progress"
+  | "generating"
+  | "failed"
+  | "ready"
+  | "partially_unavailable"
+  | "no_events";
+
+export interface ProctoringState {
+  state: ProctoringStateName;
+  message: string | null;
+}
+
 export interface ProctoringReport {
   candidate: string;
   assessment: string;
@@ -1452,6 +1471,12 @@ export interface VideoAccess {
   video_status: string;
   /** One client-facing sentence explaining the word above. */
   video_status_detail: string;
+  /** recording, uploaded, compressing, storing, ready, missing, failed or stalled. */
+  video_stage: string;
+  /** What the stage means and what the reviewer can do about it. */
+  video_stage_detail: string;
+  /** When the pipeline last reported on this recording; null when unknown. */
+  last_reported_at: string | null;
   /** Set only once the recording is ready; null is "not known yet". */
   duration_seconds: number | null;
   compressed_size_bytes: number | null;

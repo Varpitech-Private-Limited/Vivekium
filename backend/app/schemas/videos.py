@@ -15,6 +15,7 @@ No candidate score, grade or rank appears here. `duration_seconds` and
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel
 
@@ -104,6 +105,13 @@ class VideoAccessOut(BaseModel):
     video_status: str
     #: One client-facing sentence explaining the word above.
     video_status_detail: str
+
+    #: The finer stage behind the word: recording, uploaded, compressing,
+    #: storing, ready, missing, failed or stalled, with a sentence saying what
+    #: it means and what the reviewer can do, and when the pipeline last said so.
+    video_stage: str = "missing"
+    video_stage_detail: str = ""
+    last_reported_at: datetime | None = None
 
     #: Set only once the recording is ready; null is "not known yet", never 0.
     duration_seconds: float | None = None

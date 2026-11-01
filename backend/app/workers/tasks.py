@@ -2354,19 +2354,66 @@ def process_candidate_project(project_id: str):
 
     Idempotent by construction: derived output lives in columns on the one
     project row, a completed project returns immediately, and staging keys
-    are content-addressed, so a redelivery reruns safely. Transient
-    failures (storage, a provider 429) raise and use the retry budget;
-    deterministic refusals (a hostile archive, a rejected repository URL) are
-    recorded as terminal statuses inside the pipeline and do NOT raise.
+    are content-addressed, so a redelivery reruns safely. Deterministic
+    refusals (a hostile archive, a rejected repository URL) are recorded as
+    terminal statuses inside the pipeline and do NOT raise.
+
+    EXECUTION IS CLAIMED AND VISIBLE (2026-11-01, `services/projects/lifecycle`).
+    Only one delivery moves `submitted` to `processing`; a second finds a live
+    worker and stands down. `updated_at` is touched every minute while the
+    pipeline works, so a quiet `processing` row means a lost worker. A repository
+    that cannot be read (`RepositoryUnavailable`) is COUNTED ON THE ROW, and at
+    the bound the project is ended as `failed_extraction` with a sentence the
+    candidate can act on, instead of rolling back to an unchanged `submitted`
+    row for ever. Below the bound the error is still raised so the runtime's
+    retry and the job ledger both see the failure.
     """
+    import asyncio
+
+    from app.services.projects import lifecycle
     from app.services.projects import pipeline as project_pipeline
+    from app.services.projects.repository import RepositoryUnavailable
+
+    pid = uuid.UUID(str(project_id))
+
+    async def _beat():
+        while True:
+            await asyncio.sleep(lifecycle.HEARTBEAT_SECONDS)
+            try:
+                async with _worker_session() as session:
+                    await lifecycle.touch(session, pid)
+            except Exception as exc:  # noqa: BLE001 -- a missed beat must not fail the work
+                logger.warning(
+                    "project_evidence.heartbeat_failed project_id=%s error=%s",
+                    project_id, type(exc).__name__,
+                )
 
     async def _task():
         async with _worker_session() as session:
-            project = await project_pipeline.process_project(
-                session, uuid.UUID(str(project_id))
-            )
-            await session.commit()
+            verdict = await lifecycle.claim(session, pid)
+            if verdict in (lifecycle.BUSY, lifecycle.MISSING):
+                logger.warning(
+                    "project_evidence.not_claimed project_id=%s verdict=%s",
+                    project_id, verdict,
+                )
+                return
+            beat = asyncio.create_task(_beat())
+            try:
+                project = await project_pipeline.process_project(session, pid)
+                await session.commit()
+            except RepositoryUnavailable as exc:
+                await session.rollback()
+                ended = await lifecycle.record_fetch_failure(session, pid)
+                logger.warning(
+                    "project_evidence.repository_unavailable project_id=%s "
+                    "error=%s ended=%s",
+                    project_id, type(exc).__name__, ended,
+                )
+                if ended:
+                    return  # recorded as a terminal status; nothing to retry
+                raise
+            finally:
+                beat.cancel()
             logger.info(
                 "project_evidence.processed project_id=%s status=%s "
                 "original_deleted=%s",
@@ -2390,10 +2437,12 @@ def reconcile_project_intake():
        staged objects should be gone, so retry the verified deletion. This is
        the observability half of the brief's deletion contract -- a failed
        deletion is counted and retried, never assumed away.
-    2. Projects stuck in `submitted` or `processing` for over 30 minutes: the
-       task was lost (broker hiccup, worker restart mid-run), so re-enqueue.
-       The pipeline is idempotent, so a duplicate enqueue costs a rerun and
-       nothing else.
+    2. Projects stuck in `submitted` for over 30 minutes, or `processing` with
+       a silent heartbeat (`updated_at`, see `services/projects/lifecycle`):
+       the task was lost, so re-enqueue through the durable outbox, unless a
+       job for the project is still live in the ledger (the ledger sweep owns
+       starting it). BOUNDED: after `MAX_STUCK_REDISPATCHES` the project ends
+       as `failed_extraction` with a sentence the candidate can act on.
     3. `partially_processed` projects (deterministic evidence persisted, the
        AI interpretation missing): re-enqueue the AI-only completion, BOUNDED
        by the run counter so a permanently failing interpretation cannot loop
@@ -2409,13 +2458,15 @@ def reconcile_project_intake():
         STATUS_SUBMITTED,
         CandidateProject,
     )
+    from app.services.projects import lifecycle
     from app.services.projects import pipeline as project_pipeline
+    from app.workers import jobs as job_ledger
+    from app.workers.dispatch import dispatch_once_after_commit
 
     MAX_AUTOMATIC_RUNS = 5
 
     async def _task():
         async with _worker_session() as session:
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
             rows = (
                 await session.execute(
                     select(CandidateProject).where(
@@ -2424,8 +2475,7 @@ def reconcile_project_intake():
                             & (CandidateProject.original_deleted_at.is_(None)),
                             CandidateProject.status.in_(
                                 [STATUS_SUBMITTED, STATUS_PROCESSING]
-                            )
-                            & (CandidateProject.created_at < cutoff),
+                            ),
                             CandidateProject.status == STATUS_PARTIALLY_PROCESSED,
                         )
                     )
@@ -2433,6 +2483,8 @@ def reconcile_project_intake():
             ).scalars().all()
             retried_deletion = 0
             requeued = 0
+            failed_out = 0
+            now = datetime.now(timezone.utc)
             for project in rows:
                 if project.processed_at is not None and (
                     project.original_deleted_at is None
@@ -2440,25 +2492,58 @@ def reconcile_project_intake():
                     await project_pipeline.delete_intake_objects(session, project)
                     retried_deletion += 1
                 elif project.status in (STATUS_SUBMITTED, STATUS_PROCESSING):
-                    dispatch(
+                    # A live job (queued, blocked, running) means the ledger
+                    # sweep owns getting it started; do not stack another.
+                    if not lifecycle.is_stuck(project, now) or await job_ledger.has_active(
+                        session, "candidate_project", project.id
+                    ):
+                        continue
+                    telemetry = dict(project.telemetry_json or {})
+                    redispatches = int(telemetry.get("sweep_redispatches", 0))
+                    if redispatches >= lifecycle.MAX_STUCK_REDISPATCHES:
+                        lifecycle.fail_stuck(project)
+                        failed_out += 1
+                        logger.error(
+                            "project_evidence.stuck_failed project_id=%s "
+                            "redispatches=%d",
+                            project.id, redispatches,
+                        )
+                        continue
+                    telemetry["sweep_redispatches"] = redispatches + 1
+                    project.telemetry_json = telemetry
+                    await dispatch_once_after_commit(
+                        session,
                         "pickready.process_candidate_project",
+                        dedupe_key=f"process_candidate_project:{project.id}",
                         args=[str(project.id)],
+                        resource_type="candidate_project",
+                        resource_id=project.id,
+                        idempotent=True,
                     )
                     requeued += 1
                 elif project.status == STATUS_PARTIALLY_PROCESSED:
                     runs = int((project.telemetry_json or {}).get("runs", 0))
-                    if runs < MAX_AUTOMATIC_RUNS:
-                        dispatch(
+                    if runs < MAX_AUTOMATIC_RUNS and not await job_ledger.has_active(
+                        session, "candidate_project", project.id
+                    ):
+                        await dispatch_once_after_commit(
+                            session,
                             "pickready.process_candidate_project",
+                            dedupe_key=f"process_candidate_project:{project.id}",
                             args=[str(project.id)],
+                            resource_type="candidate_project",
+                            resource_id=project.id,
+                            idempotent=True,
                         )
                         requeued += 1
             await session.commit()
-            if retried_deletion or requeued:
+            if retried_deletion or requeued or failed_out:
                 logger.info(
-                    "project_evidence.reconcile deletions_retried=%d requeued=%d",
+                    "project_evidence.reconcile deletions_retried=%d requeued=%d "
+                    "failed_out=%d",
                     retried_deletion,
                     requeued,
+                    failed_out,
                 )
     _run(_task())
 
@@ -3142,3 +3227,5 @@ from app.workers import tasks_security_email  # noqa: E402,F401
 # The Leadership Intelligence draft (2026-09-29, spec 17), registered the
 # same way.
 from app.workers import tasks_leadership  # noqa: E402,F401
+# The job-ledger sweep (2026-11-01), registered by the same import rule.
+from app.workers import tasks_jobs  # noqa: E402,F401

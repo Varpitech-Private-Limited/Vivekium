@@ -157,6 +157,12 @@ const CONFIG = {
   sampling_fps_degraded: 1,
   low_light_luminance_threshold: 40,
   low_light_cooldown_seconds: 300,
+  loud_threshold_dbfs: -20,
+  loud_margin_db: 25,
+  loud_hysteresis_db: 6,
+  loud_sustained_seconds: 6,
+  loud_cooldown_seconds: 120,
+  loud_calibration_seconds: 10,
   mouse_sample_hz: 10,
   max_keystroke_samples: 20000,
   event_batch_max: 200,
@@ -229,6 +235,7 @@ function build(session: SessionOut = SESSION) {
       onTermination: () => undefined,
       onSessionEnded: (message) => ended.push(message),
       onPauseChange: (view) => views.push(view),
+      onAdvisory: () => undefined,
     },
     RECORDING
   );

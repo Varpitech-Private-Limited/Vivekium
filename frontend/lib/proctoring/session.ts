@@ -142,6 +142,9 @@ export interface SessionCallbacks {
   onSessionEnded: (message: string) => void;
   /** The pause picture changed. */
   onPauseChange: (view: PauseView) => void;
+  /** A non-blocking reminder for the candidate (the sound-level advisory). It
+   *  is not a warning: it holds no clock and counts toward nothing. */
+  onAdvisory: (message: string) => void;
 }
 
 export class SessionRuntime {
@@ -241,6 +244,9 @@ export class SessionRuntime {
       maxChunkBytes: config.audio_max_chunk_bytes,
       uploadEnabled: this.session.audio_analysis_available,
       upload: (chunk) => postAudioChunk(this.session.session_id, chunk),
+      sound: config,
+      emit: this.emit,
+      onAdvisory: this.callbacks.onAdvisory,
       onLost: (kind) => this.devices.lost("microphone", kind),
       onRecovered: () => {
         this.devices.recovered("microphone");
@@ -287,6 +293,7 @@ export class SessionRuntime {
         this.integrity?.check();
         return this.probe();
       },
+      detection: () => this.camera?.takeDetectionStats() ?? null,
       identityMatched: () => this.rules.identityMatched,
       onTermination: (termination) => this.terminated(termination),
       onSessionEnded: (message) => this.ended(message),

@@ -1394,6 +1394,9 @@ module "ecs" {
         # Its partner, RAZORPAY_KEY_SECRET, is server-side only and is mounted
         # from Secrets Manager below. Checkout needs both.
         RAZORPAY_KEY_ID = var.razorpay_key_id
+        # The API decides whether the microphone is offered on a prose question;
+        # the task-worker Lambda does the transcribing. Both must agree.
+        TRANSCRIBE_ENABLED = var.transcribe_enabled ? "true" : "false"
       })
       # Code sandbox stage B (all three empty until `judge0_clients_enabled`):
       # the client group that admits the API to the sandbox, and the read on
@@ -2088,6 +2091,10 @@ module "scheduler" {
     # CODE_EXECUTION_BACKEND is disabled.
     "readypick-probe-code-execution" = {
       task            = "pickready.probe_code_execution"
+      rate_expression = "rate(5 minutes)"
+    }
+    "readypick-sweep-background-jobs" = {
+      task            = "pickready.sweep_background_jobs"
       rate_expression = "rate(5 minutes)"
     }
   }

@@ -9,6 +9,7 @@
 | ID | Open point | Why it matters | Default until ruled |
 |---|---|---|---|
 | Q-30 | **Which legal obligations apply to the candidate-facing status** (A-21 is "subject to applicable legal obligations"). The 2026-09-08 brief named Article 15(1)(h) as a driver; no jurisdiction has been ruled on. | A status-only policy may be too thin in some jurisdictions. | Recruiter-facing explanations only; none built for candidates. |
+| Q-34 | **What to do with candidate verification documents already uploaded** (academic certificate, address proof), now that upload is retired. Options: keep until the candidate deletes their profile, purge all after notice, or purge by age. Plan: [../operations/BGV_LEGACY_DOCUMENTS.md](../operations/BGV_LEGACY_DOCUMENTS.md). | Holding identity-adjacent files with no purpose or sharing consent is a privacy exposure; deleting without authority breaks retention. | Keep; nothing is deleted. A candidate can still withdraw a file or delete their profile. |
 
 ## B. Unresolved technical work (recorded, not decided)
 

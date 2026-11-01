@@ -207,17 +207,9 @@ class BGVDocumentOut(BaseModel):
 
 
 class BGVDocumentsOut(BaseModel):
-    """The whole documents card, including the slots that are still empty.
-
-    Every known type is returned whether or not it holds a file, the same rule
-    the seven compliance slots follow: a short list is one a missing address
-    proof can hide in.
-    """
+    """A candidate's legacy documents (upload is retired; list and withdraw only)."""
 
     documents: list[BGVDocumentOut]
-    accepted_types: list[dict[str, str]]
-    upload_hint: str
-    max_per_type: int
 
 
 class DraftOut(BaseModel):

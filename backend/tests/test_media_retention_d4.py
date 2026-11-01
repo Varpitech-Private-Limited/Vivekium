@@ -510,4 +510,8 @@ def test_speech_to_text_is_granted_to_the_worker_that_calls_it() -> None:
     ecs = ecs[: ecs.index("\n}\n")]
     for name in ("TRANSCRIBE_ENABLED", "TRANSCRIBE_REGION", "TRANSCRIBE_BUCKET"):
         assert name in lambda_, name
+    # The API only decides whether the microphone is offered, so it carries the
+    # switch and nothing else; the region and bucket belong to the worker.
+    assert "TRANSCRIBE_ENABLED" in ecs
+    for name in ("TRANSCRIBE_REGION", "TRANSCRIBE_BUCKET"):
         assert name not in ecs, name

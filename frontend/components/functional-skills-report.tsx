@@ -14,7 +14,12 @@ import { Check, X } from "lucide-react";
 import { RatingLabel } from "@/components/rating-label";
 import { CitedRemark, type CitationsLoader } from "@/components/report-citations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RATING_GRADES, type ProctoringReport, type RatingGrade } from "@/lib/types";
+import {
+  RATING_GRADES,
+  type ProctoringReport,
+  type ProctoringState,
+  type RatingGrade,
+} from "@/lib/types";
 
 export type { RatingGrade };
 
@@ -275,6 +280,10 @@ export interface FunctionalReport {
    *  Null while the session is still running or its report is still being
    *  written. Words only: it carries no number at any path. */
   proctoring?: ProctoringReport | null;
+  /** Why `proctoring` is or is not there: no session, still running,
+   *  generating, could not be produced, partially unavailable, or genuinely no
+   *  events. The server's words; absent only on a payload from before it. */
+  proctoring_state?: ProctoringState | null;
   synthesized_at: string;
   immutable?: boolean;
   /** Whether the candidate consented to their assessment being retained for
@@ -643,7 +652,11 @@ export function FunctionalSkillsReportView({
       <ValidationPointsSection key="validation_points" points={report.validation_points} />
     ),
     validation: <ValidationSection key="validation" validation={report.validation} />,
-    proctoring: <ProctoringSection key="proctoring" report={report.proctoring ?? null} />,
+    proctoring: <ProctoringSection
+        key="proctoring"
+        report={report.proctoring ?? null}
+        state={report.proctoring_state ?? null}
+      />,
   };
 
   return (
@@ -989,15 +1002,28 @@ const FINDING_GROUPS: Array<{ key: keyof ProctoringReport["findings"]; label: st
   { key: "answer_patterns", label: "Answer Pattern Analysis" },
 ];
 
-function ProctoringSection({ report }: { report: ProctoringReport | null }) {
+function ProctoringSection({
+  report,
+  state,
+}: {
+  report: ProctoringReport | null;
+  state: ProctoringState | null;
+}) {
   return (
     <section aria-label="Proctoring Report">
       <h3 className="mb-1 text-heading">{PROCTORING_TITLE}</h3>
       <p className="mb-3 max-w-prose text-body-sm">{PROCTORING_NOTE}</p>
       {report === null ? (
-        <p className="rounded-md border p-3 text-sm">{PROCTORING_ABSENT}</p>
+        <p className="rounded-md border p-3 text-sm" data-proctoring-state={state?.state}>
+          {state?.message ?? PROCTORING_ABSENT}
+        </p>
       ) : (
         <div className="space-y-5">
+          {state?.message ? (
+            <p className="rounded-md border p-3 text-sm" data-proctoring-state={state.state}>
+              {state.message}
+            </p>
+          ) : null}
           <div className="rounded-md border p-4">
             <p className="text-xs">{report.date_line}</p>
             <p className="mt-2 max-w-prose font-medium leading-7">{report.outcome}</p>

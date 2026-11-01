@@ -47,6 +47,13 @@ class ProctoringConfig:
     second_voice_min_seconds: float
     speech_min_seconds: float
     speech_highlight_threshold: int
+    loud_threshold_dbfs: float
+    loud_margin_db: float
+    loud_hysteresis_db: float
+    loud_sustained_seconds: int
+    loud_cooldown_seconds: int
+    loud_calibration_seconds: int
+    report_overdue_minutes: int
     analysis_service_url: str
     analysis_timeout_seconds: float
     heartbeat_interval_seconds: int
@@ -120,6 +127,12 @@ CLIENT_FIELDS: tuple[str, ...] = (
     "sampling_fps_degraded",
     "low_light_luminance_threshold",
     "low_light_cooldown_seconds",
+    "loud_threshold_dbfs",
+    "loud_margin_db",
+    "loud_hysteresis_db",
+    "loud_sustained_seconds",
+    "loud_cooldown_seconds",
+    "loud_calibration_seconds",
     "mouse_sample_hz",
     "max_keystroke_samples",
     "event_batch_max",

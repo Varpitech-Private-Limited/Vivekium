@@ -339,9 +339,17 @@ async def request(
                 )
                 continue
             body = await _read_bounded(response, target, limits)
+            # `_read_bounded` returns the already decoded body, so the encoding
+            # headers must not travel with it: httpx would decode it twice
+            # (every gzip response from GitHub failed with a zlib error).
+            decoded_headers = [
+                (k, v)
+                for k, v in response.headers.multi_items()
+                if k.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+            ]
             return httpx.Response(
                 status_code=response.status_code,
-                headers=response.headers,
+                headers=decoded_headers,
                 content=body,
                 request=response.request,
             )

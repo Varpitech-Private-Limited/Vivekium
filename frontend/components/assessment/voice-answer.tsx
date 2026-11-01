@@ -42,6 +42,7 @@ import { formatClock } from "@/components/assessment/turn-timer";
 import { Button } from "@/components/ui/button";
 import { apiGet, apiPost, apiUpload } from "@/lib/api";
 import type { VoiceAnswerOut } from "@/lib/assessment/contracts";
+import { setVoiceRecordingActive } from "@/lib/assessment/voice-activity";
 
 export type VoicePhase =
   | "idle"
@@ -190,6 +191,7 @@ export const VoiceAnswer = React.forwardRef<VoiceAnswerHandle, Props>(function V
 
   const setPhase = React.useCallback((next: VoicePhase) => {
     phaseRef.current = next;
+    setVoiceRecordingActive(next === "recording");
     setPhaseState(next);
     callbacks.current.onPhaseChange(next);
   }, []);
@@ -203,6 +205,7 @@ export const VoiceAnswer = React.forwardRef<VoiceAnswerHandle, Props>(function V
     mounted.current = true;
     return () => {
       mounted.current = false;
+      setVoiceRecordingActive(false);
       if (recorder.current && recorder.current.state !== "inactive") {
         recorder.current.ondataavailable = null;
         recorder.current.onstop = null;
@@ -313,6 +316,14 @@ export const VoiceAnswer = React.forwardRef<VoiceAnswerHandle, Props>(function V
       return;
     }
     setVoice(row);
+    if (row.status !== "recording") {
+      // A spoken answer for this turn already exists (the page was reloaded
+      // while it was being transcribed): pick it up rather than record a
+      // second one the server would discard. The poll reads its outcome.
+      releaseStream();
+      setPhase("transcribing");
+      return;
+    }
     chunks.current = [];
     stoppedByClock.current = false;
     const created = media.createRecorder(opened, {
@@ -463,14 +474,19 @@ export const VoiceAnswer = React.forwardRef<VoiceAnswerHandle, Props>(function V
 
   if (phase === "unavailable") {
     return (
-      <p
+      <div
         role="alert"
-        className="flex items-start gap-2 border border-warning bg-warning/10 p-3 text-sm"
+        className="space-y-2 border border-warning bg-warning/10 p-3 text-sm"
         data-testid="voice-unavailable"
       >
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        <span>{problem ?? MICROPHONE_UNAVAILABLE}</span>
-      </p>
+        <p className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{problem ?? MICROPHONE_UNAVAILABLE}</span>
+        </p>
+        <Button type="button" variant="outline" onClick={() => setPhase("idle")}>
+          Try speaking again
+        </Button>
+      </div>
     );
   }
 
@@ -541,9 +557,10 @@ export const VoiceAnswer = React.forwardRef<VoiceAnswerHandle, Props>(function V
         )}
         Answer by speaking
       </Button>
-      <p className="text-xs">
-        Speak in English. Your answer is turned into text, and that text is your final answer: it
-        cannot be edited afterwards.
+      <p className="text-xs" data-testid="voice-hint">
+        {phase === "starting"
+          ? "Opening your microphone. Allow access if your browser asks."
+          : "Or type below. To speak, allow microphone access when asked, and speak in English. Your answer is turned into text, and that text is your final answer: it cannot be edited afterwards."}
       </p>
     </div>
   );

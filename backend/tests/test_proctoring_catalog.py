@@ -65,6 +65,8 @@ SPEC_PATH_C = {
     "MIC_STREAM_INTERRUPTED",
     "DEVICE_RECOVERED",
     "SPEECH_DURING_NON_AUDIO_QUESTION",
+    # Advisory, owner mission 2026-11-01 item B: deliberately NOT Path B.
+    "SUSTAINED_HIGH_SOUND_LEVEL",
 }
 
 #: Derived by the SERVER (section 9: "The client requests a warning; the

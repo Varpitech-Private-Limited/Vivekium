@@ -66,6 +66,7 @@ from app.models.employment import CandidateEmployment
 from app.models.dual_mode import AssessmentConsent, VideoRecording, VideoRecordingSegment
 from app.models.voice import VoiceAnswer
 from app.models.project import CandidateProject
+from app.models.background_job import BackgroundJob
 from app.models.leadership import (
     JobLeadershipContext,
     LeadershipDepartmentExpectation,
@@ -176,6 +177,7 @@ __all__ = [
     "BillingTransaction",
     "Candidate",
     "CandidateProject",
+    "BackgroundJob",
     "CandidateUpdate",
     "CandidateDeletionRequest",
     "SupportMessage",

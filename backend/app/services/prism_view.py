@@ -322,6 +322,7 @@ async def report_out(
     # The Proctoring Report, appended as the final, informational section. It
     # moves nothing above it: no grade in this payload is read from it.
     proctoring = await proctoring_report.load_report_out(session, link.id)
+    proctoring_state = await proctoring_report.load_state(session, link.id)
     candidate = await session.get(Candidate, link.candidate_id)
     _, blocked_reason = await delivery.clearance_or_reason(session, report)
 
@@ -347,6 +348,7 @@ async def report_out(
         technical=grouped.get(CATEGORY_TECHNICAL, []),
         validation=report.validation_json,
         proctoring=proctoring,
+        proctoring_state=proctoring_state,
         gap_analysis=GapAnalysisOut.model_validate(report.gap_analysis_json or {}),
         # EMPTY models, not None, for a report written before 0107.
         claim_evidence=ClaimEvidenceOut.model_validate(report.claim_evidence_json or {}),

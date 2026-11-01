@@ -151,18 +151,26 @@ def reset_client() -> None:
 
 
 def payload_for(
-    run_id: str, spec: TaskSpec, args: Sequence[Any], kwargs: dict
+    run_id: str,
+    spec: TaskSpec,
+    args: Sequence[Any],
+    kwargs: dict,
+    dispatch_attempt: int = 0,
 ) -> dict:
     """The one wire format. Both entry points parse exactly this shape.
 
     Arguments are JSON, which is what Celery's `task_serializer="json"` already
     required, so nothing that was dispatchable before has become undispatchable.
+    `dispatch_attempt` counts the sweep's re-drives of this run. The trigger
+    Lambda folds it into the `RunTask` client token, so a platform retry of one
+    invoke cannot start two tasks while a deliberate re-drive can start one.
     """
     return {
         "run_id": run_id,
         "task": spec.name,
         "args": list(args),
         "kwargs": dict(kwargs),
+        "dispatch_attempt": dispatch_attempt,
     }
 
 
@@ -180,57 +188,242 @@ def dispatch(
     return _send(spec, str(uuid.uuid4()), tuple(args or ()), dict(kwargs or {}))
 
 
+def _prepare(
+    name: str, args: Sequence[Any] | None, kwargs: dict[str, Any] | None
+) -> tuple[TaskSpec, str, tuple[Any, ...], dict[str, Any]]:
+    """Everything that can fail for a PROGRAMMING reason, checked in-request:
+    the task name resolves, the backend is valid, the arguments are JSON."""
+    spec = resolve(name)
+    backend()
+    args = tuple(args or ())
+    kwargs = dict(kwargs or {})
+    run_id = str(uuid.uuid4())
+    json.dumps(payload_for(run_id, spec, args, kwargs))
+    return spec, run_id, args, kwargs
+
+
+def _ledger_row(spec: TaskSpec, run_id: str, args, kwargs, **meta):
+    from app.workers import jobs
+
+    return jobs.new_row(
+        run_id, kind=spec.name, route=spec.route.value, args=args, kwargs=kwargs, **meta
+    )
+
+
+def _send_when_committed(session: Any, spec: TaskSpec, run_id: str, args, kwargs) -> None:
+    from app.core.after_commit import on_commit
+
+    on_commit(
+        session,
+        lambda: _send(spec, run_id, args, kwargs),
+        label=f"dispatch task={spec.name} run_id={run_id}",
+    )
+
+
 def dispatch_after_commit(
     session: Any,
     name: str,
     *,
     args: Sequence[Any] | None = None,
     kwargs: dict[str, Any] | None = None,
+    resource_type: str | None = None,
+    resource_id: Any = None,
+    required_capability: str | None = None,
+    owner_user_id: uuid.UUID | None = None,
+    idempotent: bool = False,
 ) -> TaskHandle:
     """Hand `name` off to run once `session`'s transaction COMMITS.
 
+    THE OUTBOX. A `background_jobs` row is added to `session` here, so it
+    commits or rolls back WITH the caller's own writes. The invoke after the
+    commit is only the fast path: if it is lost (Lambda control plane down, a
+    crash between commit and invoke, an ECS refusal an async invoke cannot
+    report) the row is still `queued` and `pickready.sweep_background_jobs`
+    re-drives it. A dispatched job is therefore never silent.
+
     The handle, with its client-side id, is returned NOW, so a route can put
-    the polling id in its response exactly as it does with `dispatch`; an id
-    that no run has claimed yet reads as PENDING (`workers/status`), which is
-    what it is. The invoke itself happens from SQLAlchemy's `after_commit`
+    the polling id in its response exactly as it does with `dispatch`. The
+    invoke itself happens from SQLAlchemy's `after_commit`
     (`core/after_commit.on_commit`):
 
-    - A rolled-back transaction dispatches NOTHING. A task about a row that
-      was never stored is the failure this exists to remove.
-    - The task can never start before the rows it reads are visible, which a
-      dispatch placed before `get_tenant_db`'s commit could not promise.
+    - A rolled-back transaction dispatches NOTHING and records NOTHING.
+    - The task can never start before the rows it reads are visible.
     - Everything that can fail for a PROGRAMMING reason is checked here,
-      inside the request, where raising is correct: the task name resolves,
-      the configured backend is valid, and the arguments are JSON. What is
-      left for the commit hook is the invoke itself.
-    - A `DispatchError` from that invoke is LOGGED at ERROR with the task
-      name and run id, never raised out of `commit()`: the write is durable
-      by then, and raising would answer 500 to a request that succeeded. Each
-      converted call site names the sweep that repairs a lost invoke.
+      inside the request, where raising is correct (`_prepare`).
+    - A `DispatchError` from the invoke is LOGGED at ERROR, never raised out of
+      `commit()`: the write is durable and the outbox row will be re-driven.
+
+    `resource_type`/`resource_id` name what the job is about, so a screen can
+    ask for it by resource. `required_capability` is what a reader must hold
+    (checked through RBAC per request). `idempotent=True` declares the task
+    safe to run again after a lost worker; only then does the sweep re-drive a
+    RUNNING job or may a person retry a failed one.
 
     Never call this and then raise: the raise rolls the transaction back and
     the dispatch goes with it. Return a state the client can act on instead.
     """
-    from app.core.after_commit import on_commit
-
-    spec = resolve(name)
-    backend()
-    args = tuple(args or ())
-    kwargs = dict(kwargs or {})
-    run_id = str(uuid.uuid4())
-    # Serialise now so a non-JSON argument is a TypeError in the request
-    # rather than a logged failure after the commit.
-    json.dumps(payload_for(run_id, spec, args, kwargs))
-
-    def _send_after_commit() -> None:
-        _send(spec, run_id, args, kwargs)
-
-    on_commit(
-        session,
-        _send_after_commit,
-        label=f"dispatch task={spec.name} run_id={run_id}",
+    spec, run_id, args, kwargs = _prepare(name, args, kwargs)
+    session.add(
+        _ledger_row(
+            spec, run_id, args, kwargs,
+            resource_type=resource_type, resource_id=resource_id,
+            required_capability=required_capability,
+            owner_user_id=owner_user_id, idempotent=idempotent,
+        )
     )
+    _send_when_committed(session, spec, run_id, args, kwargs)
     return TaskHandle(id=run_id, name=spec.name, route=spec.route)
+
+
+async def dispatch_once_after_commit(
+    session: Any,
+    name: str,
+    *,
+    dedupe_key: str,
+    args: Sequence[Any] | None = None,
+    kwargs: dict[str, Any] | None = None,
+    resource_type: str | None = None,
+    resource_id: Any = None,
+    required_capability: str | None = None,
+    owner_user_id: uuid.UUID | None = None,
+    idempotent: bool = False,
+) -> TaskHandle:
+    """`dispatch_after_commit`, except at most ONE active job per `dedupe_key`.
+
+    A sweep that re-enqueues a stale resource every hour would otherwise stack
+    a new queued job per pass while the first still waits for capacity. The
+    unique partial index over active `dedupe_key` rows makes the second call a
+    no-op that returns the existing job's handle. Name the work in the key, for
+    example `process_candidate_project:<project id>`.
+    """
+    from sqlalchemy import select, text
+    from sqlalchemy.dialects.postgresql import insert
+
+    from app.models.background_job import BackgroundJob
+
+    spec, run_id, args, kwargs = _prepare(name, args, kwargs)
+    row = _ledger_row(
+        spec, run_id, args, kwargs,
+        resource_type=resource_type, resource_id=resource_id,
+        required_capability=required_capability,
+        owner_user_id=owner_user_id, idempotent=idempotent, dedupe_key=dedupe_key,
+    )
+    values = {
+        column.name: getattr(row, column.name)
+        for column in BackgroundJob.__table__.columns
+        if getattr(row, column.name) is not None
+    }
+    result = await session.execute(
+        insert(BackgroundJob)
+        .values(**values)
+        .on_conflict_do_nothing(
+            index_elements=["dedupe_key"],
+            index_where=text(
+                "dedupe_key IS NOT NULL AND state NOT IN ('succeeded', 'failed')"
+            ),
+        )
+    )
+    if result.rowcount:
+        _send_when_committed(session, spec, run_id, args, kwargs)
+        return TaskHandle(id=run_id, name=spec.name, route=spec.route)
+    existing = (
+        await session.execute(
+            select(BackgroundJob.id).where(
+                BackgroundJob.dedupe_key == dedupe_key,
+                BackgroundJob.state.notin_(("succeeded", "failed")),
+            )
+        )
+    ).scalar_one_or_none()
+    logger.info("dispatch.deduplicated task=%s dedupe_key=%s", spec.name, dedupe_key)
+    return TaskHandle(id=str(existing or run_id), name=spec.name, route=spec.route)
+
+
+async def redrive(job: Any, attempt: int):
+    """Start (again) the run a `background_jobs` row describes. For the sweep.
+
+    Unlike the fast path this WAITS for the answer, because the sweep is the
+    thing that must learn why a start failed:
+
+    - `Route.ECS` invokes the trigger synchronously. A `RunTask` refusal comes
+      back as a function error whose message carries a `[capacity]` or
+      `[refused]` tag (`lambda/assessment_trigger`), so quota exhaustion is
+      recorded as `capacity_blocked` instead of being inferred from silence.
+    - `Route.LAMBDA` is an async invoke; `202` is acceptance, and the worker's
+      own claim is what makes the job `running`.
+
+    Returns a `jobs.Outcome`; a refusal is an outcome, not an exception.
+    """
+    import asyncio
+
+    from app.workers import jobs
+
+    spec = resolve(job.kind)
+    payload = job.payload or {}
+    body = payload_for(
+        str(job.id), spec, payload.get("args") or [], payload.get("kwargs") or {}, attempt
+    )
+    mode = backend()
+    if mode == BACKEND_RECORD:
+        with _recorded_lock:
+            _recorded.append(
+                RecordedDispatch(
+                    id=str(job.id), name=spec.name,
+                    args=tuple(body["args"]), kwargs=body["kwargs"],
+                )
+            )
+        return jobs.Outcome(True)
+    if mode == BACKEND_LOCAL:
+        _run_locally(body)
+        return jobs.Outcome(True)
+
+    ecs = spec.route is Route.ECS
+    function = TRIGGER_FUNCTION if ecs else WORKER_FUNCTION
+
+    def _invoke():
+        return _lambda_client().invoke(
+            FunctionName=function,
+            InvocationType="RequestResponse" if ecs else "Event",
+            Payload=json.dumps(body).encode("utf-8"),
+        )
+
+    try:
+        response = await asyncio.to_thread(_invoke)
+    except Exception as exc:  # noqa: BLE001 -- reported as an outcome, not raised
+        logger.warning(
+            "dispatch.redrive_invoke_failed task=%s function=%s error=%s",
+            spec.name, function, type(exc).__name__,
+        )
+        return jobs.Outcome(False, jobs.FAIL_DISPATCH, type(exc).__name__)
+    if response.get("FunctionError"):
+        message = ""
+        try:
+            message = str(json.loads(response["Payload"].read()).get("errorMessage", ""))
+        except (ValueError, AttributeError):
+            logger.info("dispatch.redrive_error_payload_unreadable task=%s", spec.name)
+        capacity = "[capacity]" in message
+        logger.warning(
+            "dispatch.redrive_refused task=%s run_id=%s class=%s",
+            spec.name, job.id, "capacity" if capacity else "refused",
+        )
+        return jobs.Outcome(
+            False,
+            jobs.FAIL_CAPACITY if capacity else jobs.FAIL_DISPATCH,
+            "run_task_capacity" if capacity else "run_task_refused",
+        )
+    status_code = int(response.get("StatusCode") or 0)
+    if status_code not in (200, 202):
+        return jobs.Outcome(False, jobs.FAIL_DISPATCH, f"status_{status_code}")
+    return jobs.Outcome(True)
+
+
+def requeue_after_commit(session: Any, job: Any) -> None:
+    """Send an existing, just-requeued job once `session` commits."""
+    spec = resolve(job.kind)
+    payload = job.payload or {}
+    _send_when_committed(
+        session, spec, str(job.id), tuple(payload.get("args") or ()),
+        dict(payload.get("kwargs") or {}),
+    )
 
 
 def _send(

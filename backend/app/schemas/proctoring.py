@@ -253,6 +253,22 @@ class MonitoringStateIn(BaseModel):
     handlers: bool = True
 
 
+class DetectionStatsIn(BaseModel):
+    """Camera-analysis telemetry for one heartbeat interval: counts and two
+    summary figures, never a frame, a label list or a candidate's image.
+    `phone_best_score` is the highest phone confidence seen even when it stayed
+    under the event threshold, so a phone the model half-saw can be measured
+    in a staged session instead of guessed at."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frames_processed: int = Field(ge=0, le=100_000)
+    frames_failed: int = Field(ge=0, le=100_000)
+    measured_fps: float | None = Field(default=None, ge=0.0, le=1000.0)
+    inference_ms_mean: float | None = Field(default=None, ge=0.0, le=600_000.0)
+    phone_best_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class HeartbeatIn(BaseModel):
     """POST /proctoring/sessions/{id}/heartbeat.
 
@@ -265,6 +281,7 @@ class HeartbeatIn(BaseModel):
 
     identity_matched: bool | None = None
     monitoring: MonitoringStateIn = Field(default_factory=MonitoringStateIn)
+    detection: DetectionStatsIn | None = None
 
 
 class HeartbeatOut(BaseModel):
@@ -325,3 +342,14 @@ class ProctoringReportOut(BaseModel):
     #: service means the report describes less than the whole session.
     monitoring_was_incomplete: bool
     generated_at: datetime
+
+
+class ProctoringStateOut(BaseModel):
+    """Where one application's Proctoring Report stands, in words. `state` is
+    one of `services/proctoring/report.STATE_*`; `message` is the sentence to
+    show when the state is anything but a finished, complete report."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    state: str
+    message: str | None = None

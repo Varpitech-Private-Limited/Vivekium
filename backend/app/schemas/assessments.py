@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.jobs import PostingSkillBucketOut
-from app.schemas.proctoring import ProctoringReportOut
+from app.schemas.proctoring import ProctoringReportOut, ProctoringStateOut
 from app.schemas.reports import NumberFreeDelivery
 from app.services.assessment_formats import types as question_types
 from app.services.ppi import CATEGORIES
@@ -472,6 +472,10 @@ class FunctionalReportOut(NumberFreeDelivery):
     #: score and no ranking, and it is words only so this model's number ban
     #: holds over it unchanged. None when no proctoring report exists yet.
     proctoring: ProctoringReportOut | None = None
+    #: Why `proctoring` is or is not there, in words (no session, in progress,
+    #: generating, failed, partially unavailable, no events). None only for a
+    #: caller that did not ask; `prism_view.report_out` always sets it.
+    proctoring_state: ProctoringStateOut | None = None
     #: Gap Analysis & Action Plan (9.6).
     gap_analysis: GapAnalysisOut = GapAnalysisOut()
     #: Evidence vs Claim Summary (0107). Empty on a report written before it,

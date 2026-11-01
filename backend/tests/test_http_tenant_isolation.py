@@ -357,6 +357,78 @@ def test_another_tenants_project_evidence_reads_as_missing(
         assert refused.status_code == 404, refused.text
 
 
+def _seed_projects(candidate: uuid.UUID, statuses: list[str]) -> None:
+    async def _go() -> None:
+        sessions = _sessions()
+        async with sessions() as session:
+            async with session.begin():
+                async with superadmin_scope(session):
+                    for index, status in enumerate(statuses):
+                        await session.execute(
+                            sa.text(
+                                "INSERT INTO candidate_projects (id, candidate_id, "
+                                " name, description, submission_kind, status, "
+                                " status_detail, evidence_json) VALUES (:id, :cid, "
+                                " :name, 'mine', 'repository', :status, :detail, "
+                                " CAST(:evidence AS jsonb))"
+                            ),
+                            {
+                                "id": str(uuid.uuid4()),
+                                "cid": str(candidate),
+                                "name": f"Project {index}",
+                                "status": status,
+                                "detail": "A note for the reviewer." if "fail" in status else None,
+                                "evidence": "{}",
+                            },
+                        )
+
+    _run(_go())
+
+
+def test_project_submissions_are_reported_apart_from_ready_evidence(
+    client: Caller, world: World
+) -> None:
+    """Pending, partial, success and failed all show; only ready ones carry evidence.
+
+    The false "none" came from returning only evidence-ready rows. Another
+    tenant's reviewer still gets 404 for these candidates, and their own
+    candidate's counts do not include these rows.
+    """
+    _seed_projects(
+        world.a.candidate,
+        ["submitted", "processing", "partially_processed", "processed", "failed_extraction"],
+    )
+    client.acting_for(world.a)
+    body = client.http.get(f"{V1}/candidates/{world.a.candidate}/project-evidence").json()
+    assert body["counts"] == {
+        "submitted": 5,
+        "queued": 1,
+        "analysing": 1,
+        "ready": 1,
+        "summary_only": 1,
+        "failed": 1,
+    }
+    assert len(body["submissions"]) == 5
+    assert len(body["projects"]) == 2  # processed and partially_processed only
+    failed = [row for row in body["submissions"] if row["state"] == "failed"]
+    assert failed[0]["status_detail"] == "A note for the reviewer."
+    assert "failure_code" not in failed[0]
+
+    # Isolation, both ways: B cannot read A's candidate, and A's rows do not
+    # appear in B's own candidate.
+    assert (
+        client.http.get(f"{V1}/candidates/{world.b.candidate}/project-evidence").status_code
+        == 404
+    )
+    client.acting_for(world.b)
+    assert (
+        client.http.get(f"{V1}/candidates/{world.a.candidate}/project-evidence").status_code
+        == 404
+    )
+    own = client.http.get(f"{V1}/candidates/{world.b.candidate}/project-evidence").json()
+    assert own["counts"]["submitted"] == 0 and own["submissions"] == []
+
+
 def test_another_tenants_candidate_profile_reads_as_missing(
     client: Caller, world: World
 ) -> None:

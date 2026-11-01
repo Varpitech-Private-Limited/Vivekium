@@ -12,6 +12,7 @@ candidate's explicit Yes, and this file adds the second gate on top of it.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -168,6 +169,20 @@ async def test_a_recorded_human_disposition_releases_the_pdf() -> None:
         response = await _download(factory, fx)
         assert response.media_type == "application/pdf"
         assert response.body.startswith(b"%PDF")
+        # MIME, attachment filename and cache headers the browser acts on.
+        disposition = response.headers["content-disposition"]
+        assert re.fullmatch(r'attachment; filename="prism-report-[A-Za-z0-9_-]+\.pdf"', disposition)
+        assert response.headers["cache-control"] == "private, no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        # The bytes are a readable document, not just a %PDF prefix.
+        import io
+
+        from pypdf import PdfReader
+
+        text = "\n".join(
+            page.extract_text() or "" for page in PdfReader(io.BytesIO(response.body)).pages
+        )
+        assert "PRISM Report" in text
 
         # ONE audit row for the download, committed with the request.
         from app.services import audit

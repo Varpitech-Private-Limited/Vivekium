@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { JoinFlow } from "@/components/join-flow";
+import { inviteToken } from "@/lib/invite-token";
 
 // An invitation acceptance page is addressed by a token in the query string
 // and is not content. `index: false` keeps it out of results; `follow` is left
@@ -10,12 +11,15 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-export default function JoinPage({
+// Next 16 makes `searchParams` a Promise. Read synchronously it is undefined,
+// which showed "This invitation link is incomplete" for every valid link.
+export default async function JoinPage({
   searchParams,
 }: {
-  searchParams: { invite?: string; invite_code?: string };
+  searchParams: Promise<{
+    invite?: string | string[];
+    invite_code?: string | string[];
+  }>;
 }) {
-  return (
-    <JoinFlow token={searchParams.invite ?? searchParams.invite_code ?? ""} />
-  );
+  return <JoinFlow token={inviteToken(await searchParams)} />;
 }

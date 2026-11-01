@@ -97,8 +97,12 @@ def _every_recruiter_sentence() -> list[tuple[str, str]]:
     for name in (
         "NO_ISSUES", "NO_EVENTS_AT_ALL", "CLOSING", "INFORMATIONAL_NOTE",
         "AUDIO_UNAVAILABLE", "MONITORING_REDUCED_RATE",
+        "CAMERA_ANALYSIS_FAILING", "MONITORING_COMPONENT_STOPPED",
     ):
         produced.append((name, getattr(phrasing, name)))
+    for state_name, message in sorted(phrasing.REPORT_STATE_MESSAGES.items()):
+        produced.append((f"report_state:{state_name}", message))
+    produced.append(("activity:camera_analysis_failing", phrasing.CAMERA_ANALYSIS_FAILING_ACTIVITY))
     return produced
 
 

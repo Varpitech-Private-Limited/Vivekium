@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from app.workers.dispatch import dispatch
+from app.workers.dispatch import dispatch, dispatch_after_commit
 from app.workers.registry import Route, task
 from app.workers.runtime import (
     worker_session as _worker_session,
@@ -21,6 +21,13 @@ from app.workers.runtime import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: How far back and how many ended sessions without a report the hourly sweep
+#: re-dispatches in one run. Bounded so a session whose report can never be
+#: written (a deleted candidate, say) is not retried for ever, and so one sweep
+#: cannot flood the queue after a long outage.
+_REPORT_RETRY_WINDOW_DAYS = 7
+_REPORT_RETRY_BATCH = 200
 
 
 @task(
@@ -100,7 +107,7 @@ def generate_proctoring_report(link_id: str):
 def reconcile_proctoring_sessions():
     """Hourly: close the sessions nothing else will close, and report them.
 
-    Three states, and only three:
+    Four states, and only four:
 
     1. The conversation completed but the session is still active. The report
        task was enqueued and lost (broker hiccup, worker restart). Re-enqueue
@@ -119,6 +126,15 @@ def reconcile_proctoring_sessions():
        so an assessment is never "abandoned" for proctoring while still
        "open" for billing, or the reverse.
 
+    4. The session ENDED (completed, terminated, abandoned or a technical
+       failure) more than `proctoring_report_overdue_minutes` ago and has no
+       report: the report task was lost or failed after its retries. It is
+       dispatched again. `report.generate` is idempotent and its insert is
+       ON CONFLICT DO NOTHING, so a late report, or two racing, writes one row.
+       Bounded to a recent window so an unreportable session is not retried for
+       ever. Until it succeeds the PRISM Report states that the report could
+       not be produced yet (`report.load_state`), never that nothing happened.
+
     A technical failure is NOT decided here. It is decided at termination
     time by `ingestion.outcome_for_termination`, which has the reason in
     hand; re-reading it from a row later would be a second implementation.
@@ -129,10 +145,12 @@ def reconcile_proctoring_sessions():
     from app.models.proctoring import (
         OUTCOME_ABANDONED,
         OUTCOME_ACTIVE,
+        ProctoringReport,
         ProctoringSession,
     )
     from app.services import credit_reconciliation
     from app.services.proctoring import ingestion as proctoring_ingestion
+    from app.services.proctoring.config import get_config
 
     async def _task():
         async with _worker_session() as session:
@@ -168,16 +186,42 @@ def reconcile_proctoring_sessions():
                 await proctoring_ingestion.end_session(
                     session, ps, outcome=OUTCOME_ABANDONED, reason_code=None, now=now
                 )
-                dispatch(
+                # After the commit below: a task started before it would read
+                # the session as still active and defer.
+                dispatch_after_commit(
+                    session,
                     "pickready.generate_proctoring_report",
                     args=[str(ps.job_candidate_link_id)],
                 )
                 abandoned += 1
+            overdue = now - timedelta(minutes=get_config().report_overdue_minutes)
+            window = now - timedelta(days=_REPORT_RETRY_WINDOW_DAYS)
+            unreported = (
+                await session.execute(
+                    select(ProctoringSession.job_candidate_link_id)
+                    .outerjoin(
+                        ProctoringReport,
+                        ProctoringReport.proctoring_session_id == ProctoringSession.id,
+                    )
+                    .where(
+                        ProctoringSession.outcome != OUTCOME_ACTIVE,
+                        ProctoringSession.ended_at <= overdue,
+                        ProctoringSession.ended_at >= window,
+                        ProctoringReport.id.is_(None),
+                    )
+                    .order_by(ProctoringSession.ended_at.desc())
+                    .limit(_REPORT_RETRY_BATCH)
+                )
+            ).scalars().all()
+            for link_id in unreported:
+                dispatch_after_commit(
+                    session, "pickready.generate_proctoring_report", args=[str(link_id)]
+                )
             await session.commit()
-            if completed or timed_out or abandoned:
+            if completed or timed_out or abandoned or unreported:
                 logger.info(
                     "proctoring.reconciled completed_requeued=%d pause_timed_out=%d "
-                    "abandoned=%d",
-                    completed, timed_out, abandoned,
+                    "abandoned=%d report_redispatched=%d",
+                    completed, timed_out, abandoned, len(unreported),
                 )
     _run(_task())

@@ -76,7 +76,11 @@ def invite_state(
 
 def build_invite_link(frontend_url: str, token: str) -> str:
     """The acceptance URL handled by frontend `app/(auth)/join/page.tsx`."""
-    return f"{(frontend_url or '').rstrip('/')}/join?invite={token}"
+    base = (frontend_url or "").strip().rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        # A relative link in an email is a dead link; fail loudly instead.
+        raise ValueError("FRONTEND_URL must be an absolute http(s) URL to build an invite link")
+    return f"{base}/join?invite={token}"
 
 
 class StaffInvite(Base, UUIDPKMixin, CreatedAtMixin):

@@ -302,6 +302,29 @@ async def test_a_permitted_response_keeps_the_httpx_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_gzip_response_is_decoded_once_not_twice() -> None:
+    """GitHub always gzips. The body handed back is already decoded, so the
+    encoding headers must not travel with it, or httpx decodes it again and
+    every repository fetch fails with a zlib error."""
+    import gzip
+
+    payload = b'{"default_branch": "main"}'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+            content=gzip.compress(payload),
+        )
+
+    async with client_over(handler) as client:
+        response = await egress.get(client, "https://api.github.com/repos/a/b")
+    assert response.content == payload
+    assert response.json()["default_branch"] == "main"
+    assert "content-encoding" not in response.headers
+
+
+@pytest.mark.asyncio
 async def test_the_default_client_cannot_follow_a_redirect_by_itself() -> None:
     """If it could, the per-hop allowlist check would be unreachable."""
     async with egress.build_client() as client:

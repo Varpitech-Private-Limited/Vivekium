@@ -56,7 +56,7 @@ empty key id refuses before any request. Versioning is on
 
 | Prefix | Written by | Lifecycle (the BACKSTOP, not the clock) |
 |---|---|---|
-| resumes, compliance, attachments, BGV documents | `object_storage` | none |
+| resumes, compliance, attachments, legacy BGV documents (no new uploads) | `object_storage` | none |
 | `project-intake/` | project evidence intake | deleted by the pipeline after derivation, HEAD-confirmed |
 | `assessment-raw/` | session recording segments (multipart) | 7 days; noncurrent versions 1 day |
 | `assessment-compressed/` | the processed recording | `assessment_media_retention_days` (90); noncurrent 1 day |
@@ -108,7 +108,7 @@ logs, each pinned to its constant by a test:
 |---|---|---|
 | `CODE_EXECUTION_BACKEND` | `disabled` | the sandbox is decided removal (S-20); the setting is removed with the code |
 | `judge0_enabled`, `judge0_instance_enabled`, `judge0_clients_enabled` | false | nothing is provisioned; removed with the sandbox module |
-| `transcribe_enabled` | false until the deploy stage's apply | spoken answers are not offered while false |
+| `transcribe_enabled` | true on the task-worker Lambda; the API task definition must carry `TRANSCRIBE_ENABLED=true` too (decided, pending apply: it does not on `readypick-pilot-api:57`) | the API decides whether the microphone is offered; the Lambda transcribes |
 | `INBOUND_EMAIL_DOMAIN` | empty | the region does not receive SES mail; reply threading is inert |
 
 `DEMO_MODE` is not one of the switches above. As of 2026-10-30 the pilot API task definition `readypick-pilot-api:56` sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image `readypick-pilot-frontend:46` (tag `sha-cdf9b73d358a`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. The code default is off. tfvars were not changed and must not say `demo_mode=true`. The CAPTCHA removal is deployed on `readypick-pilot-api:56` and `readypick-pilot-frontend:46`. [DEMO_MODE.md](DEMO_MODE.md)

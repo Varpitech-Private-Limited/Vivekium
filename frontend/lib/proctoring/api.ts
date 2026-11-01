@@ -151,9 +151,20 @@ export interface MonitoringStatus {
   handlers: boolean;
 }
 
+/** Mirrors `schemas/proctoring.DetectionStatsIn`: counts and two summary
+ *  figures for one heartbeat interval, never a frame. */
+export interface DetectionStats {
+  frames_processed: number;
+  frames_failed: number;
+  measured_fps: number | null;
+  inference_ms_mean: number | null;
+  phone_best_score: number | null;
+}
+
 export interface HeartbeatIn {
   identity_matched: boolean | null;
   monitoring: MonitoringStatus;
+  detection?: DetectionStats | null;
 }
 
 export interface HeartbeatOut {

@@ -1,6 +1,6 @@
 # Proctoring
 
-**Status:** current. **Reviewed:** 2026-10-14. Implemented 2026-09-02 from the owner's proctoring specification v1.0 (owner: Manju, Hanulisa Technologies LLP) and brought to the current state by the 2026-09-25 release. This file records where each rule is enforced. The seven product principles are locked; this document does not soften any of them.
+**Status:** current. **Reviewed:** 2026-11-01. Implemented 2026-09-02 from the owner's proctoring specification v1.0 (owner: Manju, Hanulisa Technologies LLP) and brought to the current state by the 2026-09-25 release. This file records where each rule is enforced. The seven product principles are locked; this document does not soften any of them.
 
 Current behaviour in one paragraph: a lost camera or microphone pauses the assessment (Path P) rather than ending it; every paused second is a row the server wrote in `assessment_pauses`; the rules the candidate reads are served from the same settings the pipeline enforces; the audio rules measure a second voice and log speech during non-audio questions; every blocked paste is itemised; the session recording arrives in segments and is purged at ninety days or the job-closure purge (register P-08).
 
@@ -129,6 +129,57 @@ nothing from proctoring. This replaces the client-reported `paused_ms`.
   into the summary from `proctoring_speech_highlight_threshold` (3)
   occurrences.
 
+## Sustained high sound level (advisory, 2026-11-01)
+
+`SUSTAINED_HIGH_SOUND_LEVEL` is a Path C advisory. It is deliberately NOT
+Path B: it never reaches the shared warning counter, never opens a warning
+pause and never ends an assessment, whatever the job's policy. Treating it as
+a warning, or escalating it, is an owner decision and is not built.
+
+- **Measured in the browser** (`lib/proctoring/sound-level.ts`, fed by the
+  analyser in `audio.ts`): RMS of the microphone samples in dBFS. That is NOT a
+  sound pressure level. Browsers apply automatic gain and noise suppression, so
+  the same shout reads differently on two laptops. It cannot prove shouting or
+  anything about the candidate, and the copy says so.
+- **Rules** (all `proctoring_loud_*` settings, projected to the client in
+  `CLIENT_FIELDS`): the median level over the first `calibration_seconds` is the
+  room's noise floor; loud is at or above the larger of `threshold_dbfs` and
+  `floor + margin_db`; it must last `sustained_seconds`; once loud it must fall
+  `hysteresis_db` below the line to count as quiet; one advisory per
+  `cooldown_seconds`, and one per loud stretch. A gap in the readings longer
+  than half the sustained window breaks a stretch.
+- **Excluded**: a reading is not judged while the candidate is dictating a
+  spoken answer, while the microphone track is muted, or while it is lost
+  (a lost microphone is the device pause's business). Voice input and the
+  advisory coordinate through one flag owned by the voice side,
+  `setVoiceRecordingActive` / `isVoiceRecordingActive` in
+  `lib/assessment/voice-activity.ts` (it also fires the window event
+  `vivekium:voice-recording`). The voice-answer component sets it for the
+  recording phase; `audio.ts` reads it on every reading. The server applies the
+  same exclusion again, below.
+- **The server validates** (`ingestion._loud`): the claimed duration must reach
+  `proctoring_loud_sustained_seconds`; no cooldown in force; no spoken answer
+  captured around now (the same `voice_answers` probe the speech rule uses).
+  A refused report is logged with its reason and not stored. Only `peak_dbfs`,
+  `floor_dbfs` and `character` are kept, and the row records
+  `measure: uncalibrated_microphone_level`.
+- **Uncertainty is recorded**, not hidden: `character` is `voice_like` or
+  `broadband`, from ONE moment's spectrum (energy share in 300 to 3400 Hz). It
+  labels, it never decides. Loud music and a shout can both read either way.
+- **What the candidate sees**: a dismissible status line,
+  "Sustained high sound level detected; please check your environment." It holds
+  no clock and needs no acknowledgement. The rules screen says it is a note
+  only.
+- **What the recruiter reads**: one hedged sentence under Audio Monitoring (it
+  cannot tell shouting from a loud room, a fan, music or the microphone's own
+  volume settings, and never earns a warning). It leads the summary only when
+  nothing else was found.
+- **Pending measurement**: the default numbers (-20 dBFS, 25 dB margin, 6 s,
+  120 s cooldown, 10 s calibration) are reasoned starting points checked
+  against synthetic level sequences (`lib/proctoring/sound-level.test.ts`), not
+  tuned on real microphones, fans, dictation or auto-gain hardware. They are
+  settings so they can move without a deploy once staged recordings exist.
+
 ## Every blocked paste is on its own line
 
 `BLOCKED_ACTION_ATTEMPTED` carries the refused action in `metadata.action`
@@ -169,6 +220,30 @@ calls `job_assessment_retention.require_readable` after the tenant check and
 before loading, so a closed job answers 410 exactly as the PRISM Report does.
 A termination orders the PRISM Report after commit.
 
+**Why there is no report is stated, not implied (2026-11-01).**
+`FunctionalReportOut.proctoring_state` (`{state, message}`, words only) is
+built by `report.load_state` from the session and report rows, never from the
+absence of events. The states: `no_session` (no monitoring session exists),
+`in_progress` (the session has not ended), `generating` (ended, report not
+there yet), `failed` (ended more than `proctoring_report_overdue_minutes` ago
+and still no report; the hourly sweep is retrying), `partially_unavailable`
+(report exists with `monitoring_was_incomplete`), `no_events` (report exists,
+monitoring complete, nothing recorded) and `ready` (no message). A renderer
+shows the message instead of a clean-looking blank, and above a partial report.
+`failed` is a time-based reading: there is no durable failure row, so a session
+with a permanently unreportable cause stays `failed` until it leaves the
+sweep's window.
+
+`pickready.reconcile_proctoring_sessions` has four jobs, in this order: close
+an active session whose conversation completed (re-dispatch the report); settle
+a device pause past its grace; abandon a silent session (its report is ordered
+AFTER the commit with `dispatch_after_commit`, so the task cannot read the
+session as still active); and re-dispatch the report of any ENDED session that
+has none after the overdue interval, within the last seven days and at most two
+hundred per run. `report.generate` inserts with `ON CONFLICT DO NOTHING` on the
+session's unique key, so a late report, a retried delivery and a concurrent
+sweep write one row. A report moves no grade or ranking (P3).
+
 ## Retention
 
 The platform has no time-based candidate-data purge; personal data is deleted
@@ -185,6 +260,44 @@ finalize, and `pickready.reconcile_assessment_recordings` purges at
 (`assessment_media_retention_days`) or the job-closure purge, whichever is
 first. The S3 lifecycle rule is the backstop, not the clock. See the decision register (P-08)
 and `docs/operations/INFRA_TOPOLOGY.md`.
+
+What a reviewer sees of the recording (`GET /videos/links/{link_id}`): the four dashboard words plus `video_stage` (recording, uploaded, compressing, storing, ready, missing, failed, stalled), a sentence saying what it means and what to do, and when the pipeline last reported. `stalled` uses the repair sweep's own bounds (`video_orphan_grace_minutes`, `processing_stall_after`). The page polls while the stage is in progress and the tab is visible. Preview needs the hiring team and `view_review_screen`; download additionally re-reads the candidate's `retain_video_consent` on every request; each minted URL writes an audit row; deleted media answers 409 with the deletion sentence; no bucket or key leaves the API.
+
+## Phone detection: what is verified and what is pending
+
+The chain is `CameraMonitor` (sampling), the inference worker (COCO-SSD
+`lite_mobilenet_v2`, served from our own origin), `DetectionRules` (confidence
+over `object_confidence_threshold`, `object_consecutive_frames` in a row),
+`EventQueue`, `POST .../events`, `ingestion` (Path B, shared counter,
+`object_cooldown_seconds`), the warning on the candidate's screen, the report.
+`lib/proctoring/phone-pipeline.test.ts` pins the client half with scripted
+detections (held, brief, half-seen, flickering, failing model) and the ingest
+tests pin the server half.
+
+- **Failure is visible.** A frame the worker could not process is counted. A run
+  as long as one heartbeat interval's worth of frames raises
+  `SESSION_QUALITY_DEGRADED` with the note `camera_analysis_failing`; the report
+  then says a phone may not have been detected for that period and sets
+  `monitoring_was_incomplete`. A worker that answers frames with errors no longer
+  counts as responsive, so the heartbeat reports `models: false`, which the
+  server records as an `INTEGRITY_CHECK_WARNING` that the report also states.
+  A model that cannot load fails the system check; there is no unmonitored start.
+- **Telemetry** (numbers only, no frame, no label list): each heartbeat carries
+  `detection` (`frames_processed`, `frames_failed`, `measured_fps`,
+  `inference_ms_mean`, `phone_best_score`). The server logs it as
+  `proctoring.detection_stats` and logs each batch as `proctoring.ingest`
+  (received, stored, warned). `phone_best_score` is the highest phone confidence
+  seen even when it stayed under the threshold, which is the figure needed to
+  tune the threshold from staged sessions.
+- **Pending measurement (not tuned).** The confidence floor (0.65) and the three
+  consecutive frames are unchanged. No consented staged recordings exist yet to
+  give precision and recall, and a guess either way trades missed phones against
+  false warnings, which are Path B. One limit is pinned by a test rather than
+  hidden: one frame under the floor restarts the run, so a phone the model
+  scores 0.9, 0.9, 0.5 repeatedly is in view and never reported. Allowing a
+  one-frame gap is the obvious candidate change, to be decided with measured
+  figures. Comparing COCO-SSD with a YOLO model is likewise pending and, if
+  done, stays in the browser worker; it is not added to the Python API.
 
 ## What is honest about the limits
 

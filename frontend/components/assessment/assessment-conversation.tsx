@@ -656,6 +656,12 @@ export function AssessmentConversation({ linkId }: { linkId: string }) {
                       </Button>
                     </div>
                   ) : null}
+                  {prose && !typingOnly && !conversation.voice_input_available ? (
+                    <p className="text-xs" data-testid="voice-not-offered">
+                      Answering by voice is not switched on for this assessment. Please type your
+                      answer below.
+                    </p>
+                  ) : null}
                   {showVoice ? (
                     <div hidden={voiceRetry !== null}>
                       <VoiceAnswer

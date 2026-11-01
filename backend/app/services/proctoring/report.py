@@ -46,11 +46,12 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import config
@@ -65,7 +66,7 @@ from app.models.proctoring import (
     ProctoringReport,
     ProctoringSession,
 )
-from app.schemas.proctoring import ProctoringReportOut
+from app.schemas.proctoring import ProctoringReportOut, ProctoringStateOut
 from app.services.proctoring import catalog, ingestion, phrasing
 from app.services.proctoring.config import get_config
 
@@ -77,6 +78,8 @@ __all__ = [
     "compose",
     "generate",
     "load_report_out",
+    "load_state",
+    "state_of",
     "ReportNotReady",
 ]
 
@@ -156,6 +159,13 @@ class EventView:
         return (
             self.event_type == catalog.DEVICE_RECOVERED
             and self.metadata.get(ingestion.NOTE_KEY) == ingestion.NOTE_RESUMED
+        )
+
+    @property
+    def camera_analysis_failing(self) -> bool:
+        return (
+            self.event_type == "SESSION_QUALITY_DEGRADED"
+            and self.metadata.get("note") == phrasing.CAMERA_ANALYSIS_FAILING_NOTE
         )
 
     @property
@@ -265,6 +275,10 @@ def _speech_count(events: list[EventView]) -> int:
 def _system_sentences(events: list[EventView], ps_quality: str) -> list[str]:
     """Pauses, monitoring gaps and device quality notes, stated plainly."""
     sentences: list[str] = []
+    # First: the summary keeps only the first two gaps, and what the camera
+    # could not see matters more than how fast it ran.
+    if any(e.camera_analysis_failing for e in events):
+        sentences.append(phrasing.CAMERA_ANALYSIS_FAILING)
     pause = _pause_sentence(events)
     if pause is not None:
         sentences.append(pause)
@@ -272,10 +286,18 @@ def _system_sentences(events: list[EventView], ps_quality: str) -> list[str]:
     for gap in sorted(gaps, key=lambda e: e.occurred_at):
         sentences.append(phrasing.finding_sentence(gap.event_type, times=1, duration_ms=gap.duration_ms))
     degraded = any(
-        e.event_type == "SESSION_QUALITY_DEGRADED" and not e.audio_note for e in events
+        e.event_type == "SESSION_QUALITY_DEGRADED"
+        and not e.audio_note
+        and not e.camera_analysis_failing
+        for e in events
     )
     if degraded or ps_quality != QUALITY_GOOD:
         sentences.append(phrasing.MONITORING_REDUCED_RATE)
+    # A phone the camera analysis could not see is not a phone that was absent:
+    # these sentences set `monitoring_was_incomplete`, so the report cannot
+    # read as an all-clear for a period the monitoring was blind.
+    if any(e.event_type == "INTEGRITY_CHECK_WARNING" for e in events):
+        sentences.append(phrasing.MONITORING_COMPONENT_STOPPED)
     return sentences
 
 
@@ -452,15 +474,24 @@ async def generate(session: AsyncSession, ps: ProctoringSession) -> ProctoringRe
         audio_available=get_config().audio_analysis_available,
     )
     now = datetime.now(timezone.utc)
-    row = ProctoringReport(
-        tenant_id=ps.tenant_id,
-        proctoring_session_id=ps.id,
-        generated_at=now,
-        report_content=content,
-        report_version=REPORT_VERSION,
+    # ON CONFLICT DO NOTHING: the report task, the hourly reconciler and a
+    # retry can overlap, and the UNIQUE on the session makes the first writer
+    # the report. A loser reads the winner's row instead of failing.
+    await session.execute(
+        pg_insert(ProctoringReport)
+        .values(
+            id=uuid.uuid4(),
+            tenant_id=ps.tenant_id,
+            proctoring_session_id=ps.id,
+            generated_at=now,
+            report_content=content,
+            report_version=REPORT_VERSION,
+        )
+        .on_conflict_do_nothing(index_elements=[ProctoringReport.proctoring_session_id])
     )
-    session.add(row)
-    await session.flush()
+    row = await _existing(session, ps.id)
+    if row is None:  # pragma: no cover - the insert above either wrote or conflicted
+        raise RuntimeError(f"proctoring report for session {ps.id} was not stored")
     logger.info(
         "proctoring.report_generated session_id=%s outcome=%s events=%d",
         ps.id, ps.outcome, len(rows),
@@ -483,3 +514,63 @@ async def load_report_out(
     if row is None:
         return None
     return ProctoringReportOut(**row.report_content, generated_at=row.generated_at)
+
+
+# ── The state of the report, for the PRISM Report ────────────────────────────
+
+STATE_NO_SESSION = "no_session"
+STATE_IN_PROGRESS = "in_progress"
+STATE_GENERATING = "generating"
+STATE_FAILED = "failed"
+STATE_READY = "ready"
+STATE_PARTIAL = "partially_unavailable"
+STATE_NO_EVENTS = "no_events"
+
+
+def state_of(
+    ps: ProctoringSession | None,
+    report: ProctoringReport | None,
+    *,
+    now: datetime,
+    overdue: timedelta,
+) -> tuple[str, str | None]:
+    """The state of one application's Proctoring Report and, when it is not
+    simply a finished report, the sentence that says so. Pure.
+
+    "No report" is five different facts, and a recruiter reading a PRISM Report
+    needs to tell them apart: there was never a monitoring session; the session
+    has not ended; the report is being written; the report should have been
+    written by now and was not; and (with a report) either monitoring had gaps
+    or it was complete and nothing happened.
+    """
+    if ps is None:
+        return STATE_NO_SESSION, phrasing.REPORT_STATE_MESSAGES[STATE_NO_SESSION]
+    if report is not None:
+        content = report.report_content or {}
+        if content.get("monitoring_was_incomplete"):
+            return STATE_PARTIAL, phrasing.REPORT_STATE_MESSAGES[STATE_PARTIAL]
+        if not content.get("activity_log"):
+            return STATE_NO_EVENTS, phrasing.REPORT_STATE_MESSAGES[STATE_NO_EVENTS]
+        return STATE_READY, None
+    if ps.outcome == OUTCOME_ACTIVE:
+        return STATE_IN_PROGRESS, phrasing.REPORT_STATE_MESSAGES[STATE_IN_PROGRESS]
+    ended = ps.ended_at or ps.updated_at or ps.consented_at
+    if now - ended > overdue:
+        return STATE_FAILED, phrasing.REPORT_STATE_MESSAGES[STATE_FAILED]
+    return STATE_GENERATING, phrasing.REPORT_STATE_MESSAGES[STATE_GENERATING]
+
+
+async def load_state(session: AsyncSession, link_id: uuid.UUID) -> ProctoringStateOut:
+    ps = (
+        await session.execute(
+            select(ProctoringSession).where(ProctoringSession.job_candidate_link_id == link_id)
+        )
+    ).scalars().first()
+    row = await _existing(session, ps.id) if ps is not None else None
+    state, message = state_of(
+        ps,
+        row,
+        now=datetime.now(timezone.utc),
+        overdue=timedelta(minutes=get_config().report_overdue_minutes),
+    )
+    return ProctoringStateOut(state=state, message=message)

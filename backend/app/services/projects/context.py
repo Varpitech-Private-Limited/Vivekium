@@ -23,7 +23,18 @@ from typing import Any, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.project import EVIDENCE_READY_STATUSES, CandidateProject
+from app.models.project import (
+    EVIDENCE_READY_STATUSES,
+    STATUS_FAILED_EVIDENCE,
+    STATUS_FAILED_EXTRACTION,
+    STATUS_FAILED_SECURITY,
+    STATUS_PARTIALLY_PROCESSED,
+    STATUS_PERSISTED,
+    STATUS_PROCESSED,
+    STATUS_PROCESSING,
+    STATUS_SUBMITTED,
+    CandidateProject,
+)
 
 #: Ceiling for the question-generation context block. Small on purpose: this
 #: rides inside a prompt that already carries a JD, a framework and a resume
@@ -147,10 +158,63 @@ def recruiter_view(project: CandidateProject) -> dict[str, Any]:
     }
 
 
-async def recruiter_views(
+#: What a reviewer is told about each submission, by stored status. A word, so
+#: the screen never has to interpret a database status.
+_SUBMISSION_STATE: dict[str, str] = {
+    STATUS_SUBMITTED: "queued",
+    STATUS_PROCESSING: "analysing",
+    STATUS_PERSISTED: "analysing",
+    STATUS_PROCESSED: "ready",
+    STATUS_PARTIALLY_PROCESSED: "summary_only",
+    STATUS_FAILED_SECURITY: "failed",
+    STATUS_FAILED_EXTRACTION: "failed",
+    STATUS_FAILED_EVIDENCE: "failed",
+}
+
+
+def submission_state(status: str) -> str:
+    return _SUBMISSION_STATE[status]
+
+
+def _submission(project: CandidateProject) -> dict[str, Any]:
+    """Submission status only: no evidence, no candidate text, no failure code."""
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "state": submission_state(project.status),
+        "status_detail": project.status_detail,
+        "submitted_at": project.created_at.isoformat() if project.created_at else None,
+        "updated_at": project.updated_at.isoformat() if project.updated_at else None,
+        "processed_at": project.processed_at.isoformat() if project.processed_at else None,
+    }
+
+
+async def recruiter_overview(
     session: AsyncSession, candidate_id: uuid.UUID
-) -> list[dict[str, Any]]:
-    return [
-        recruiter_view(project)
-        for project in await ready_projects(session, candidate_id)
-    ]
+) -> dict[str, Any]:
+    """Every submission's status, kept apart from the evidence that is ready.
+
+    `projects` is derived evidence and holds only evidence-ready rows.
+    `submissions` holds EVERY row, so a project still being analysed is never
+    reported as absent. `counts` lets the screen say "3 projects submitted;
+    analysis queued" and reserve "none" for a candidate with no rows at all.
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(CandidateProject)
+                .where(CandidateProject.candidate_id == candidate_id)
+                .order_by(CandidateProject.created_at)
+            )
+        ).scalars()
+    )
+    counts = {"submitted": len(rows)}
+    for state in sorted(set(_SUBMISSION_STATE.values())):
+        counts[state] = sum(1 for row in rows if submission_state(row.status) == state)
+    return {
+        "projects": [
+            recruiter_view(row) for row in rows if row.status in EVIDENCE_READY_STATUSES
+        ],
+        "submissions": [_submission(row) for row in rows],
+        "counts": counts,
+    }

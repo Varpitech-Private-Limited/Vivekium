@@ -54,6 +54,7 @@ It never deletes an answer.
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -153,6 +154,13 @@ NOTE_PAUSE_LIMIT = "pause_limit_reached"
 NOTE_RESUMED = "resumed"
 NOTE_NOT_PAUSED = "not_paused"
 NOTE_RECOVERED_TOO_LATE = "recovered_after_grace"
+
+#: What the sound-level record keeps of the browser's metadata (`_loud`). The
+#: levels are dBFS of an uncalibrated microphone; `character` is the browser's
+#: single-moment guess at whether the energy sat in the speech band.
+LOUD_MEASURE = "uncalibrated_microphone_level"
+LOUD_LEVEL_KEYS = ("peak_dbfs", "floor_dbfs")
+LOUD_CHARACTERS = frozenset({"voice_like", "broadband"})
 
 #: Consecutive-evidence counter names in `state`.
 _IDENTITY_RUN = "identity_mismatch"
@@ -676,6 +684,13 @@ async def _apply(
         await _recover_or_end(run, occurred_at=occurred_at, metadata=meta, record=True)
         return
 
+    if kind == catalog.SOUND_LEVEL:
+        await _loud(
+            run, occurred_at=occurred_at, duration_ms=duration_ms,
+            question_id=question_id, metadata=metadata,
+        )
+        return
+
     if path == catalog.PATH_C:
         _store(
             run, event_type=kind, path=path, occurred_at=occurred_at,
@@ -763,6 +778,54 @@ async def _apply(
             kind, number=number, max_warnings=run.config.max_warnings, policy=run.policy
         ),
         final=decision.final,
+    )
+
+
+async def _loud(
+    run: _Run,
+    *,
+    occurred_at: datetime,
+    duration_ms: int | None,
+    question_id: uuid.UUID | None,
+    metadata: dict[str, Any],
+) -> None:
+    """A sustained high microphone level: an ADVISORY, stored on Path C only.
+
+    The browser measured an uncalibrated level, so the server stores it only
+    when the duration the browser claims clears the sustained window, the
+    advisory is not inside the cooldown, and no spoken answer was being
+    captured (the candidate dictating is not an environment problem). A
+    refused report is logged with its reason and not stored: storing it would
+    put an occurrence in the Proctoring Report that the rules do not allow.
+    Only the whitelisted fields are kept, and the record says in its own
+    metadata that the measure is an uncalibrated microphone level.
+    """
+    from app.services.proctoring import audio as proctoring_audio  # noqa: PLC0415
+
+    kind = catalog.SOUND_LEVEL
+    reason: str | None = None
+    if duration_ms is None or _below(duration_ms, run.config.loud_sustained_seconds):
+        reason = "under_sustained_window"
+    elif await proctoring_audio.voice_capture_open(
+        run.session, run.ps.conversation_id, run.now, run.config
+    ):
+        reason = "spoken_answer_open"
+    elif await state.in_cooldown(run.ps.id, kind):
+        reason = "within_cooldown"
+    if reason is not None:
+        logger.info("proctoring.sound_level_refused session_id=%s reason=%s", run.ps.id, reason)
+        return
+    await state.start_cooldown(run.ps.id, kind, run.config.loud_cooldown_seconds)
+    kept: dict[str, Any] = {"measure": LOUD_MEASURE}
+    for key in LOUD_LEVEL_KEYS:
+        value = metadata.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+            kept[key] = round(float(value), 1)
+    if metadata.get("character") in LOUD_CHARACTERS:
+        kept["character"] = metadata["character"]
+    _store(
+        run, event_type=kind, path=catalog.PATH_C, occurred_at=occurred_at,
+        duration_ms=duration_ms, confidence=None, question_id=question_id, metadata=kept,
     )
 
 
@@ -857,6 +920,12 @@ async def ingest(
             metadata=dict(event.metadata),
         )
     await session.flush()
+    # Counts only: which events were stored against which were refused is how
+    # a phone the browser saw is told apart from one the server never kept.
+    logger.info(
+        "proctoring.ingest session_id=%s received=%d stored=%d warned=%s ended=%s",
+        ps.id, len(batch.events), run.accepted, run.warning is not None, run.ended,
+    )
     return await _out(run)
 
 
@@ -916,6 +985,7 @@ async def heartbeat(
     monitoring: dict[str, bool],
     now: datetime,
     enqueue: Enqueue | None = None,
+    detection: dict[str, Any] | None = None,
 ) -> HeartbeatOut:
     """Section 9. A gap over `heartbeat_gap_seconds` is a monitoring
     interruption and appears in the report; a heartbeat that reports a
@@ -966,6 +1036,14 @@ async def heartbeat(
         logger.info("proctoring.heartbeat_gap session_id=%s gap_ms=%d", ps.id, gap_ms)
     ps.last_heartbeat_at = now
     ps.updated_at = now
+    if detection is not None:
+        logger.info(
+            "proctoring.detection_stats session_id=%s frames=%s failed=%s fps=%s "
+            "inference_ms=%s phone_best=%s",
+            ps.id, detection.get("frames_processed"), detection.get("frames_failed"),
+            detection.get("measured_fps"), detection.get("inference_ms_mean"),
+            detection.get("phone_best_score"),
+        )
     if identity_matched is True:
         await state.reset_consecutive(ps.id, _IDENTITY_RUN)
     down = sorted(name for name, alive in monitoring.items() if alive is False)

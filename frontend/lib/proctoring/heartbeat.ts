@@ -19,13 +19,16 @@
  * on this device's clock: the countdown a candidate watches is the server's
  * deadline, not one this client started.
  */
-import type { HeartbeatIn, HeartbeatOut, MonitoringStatus, TerminationOut } from "./api";
+import type { DetectionStats, HeartbeatIn, HeartbeatOut, MonitoringStatus, TerminationOut } from "./api";
 import { isSessionEnded } from "./api";
 
 export interface HeartbeatOptions {
   intervalMs: number;
   post: (body: HeartbeatIn) => Promise<HeartbeatOut>;
   monitoring: () => MonitoringStatus;
+  /** Camera-analysis telemetry for the interval just ended, when there is a
+   *  camera monitor to ask. */
+  detection?: () => DetectionStats | null;
   /** The most recent identity comparison, or null when none has run. */
   identityMatched: () => boolean | null;
   onTermination: (termination: TerminationOut) => void;
@@ -55,6 +58,7 @@ export function startHeartbeat(options: HeartbeatOptions): HeartbeatHandle {
       const result = await options.post({
         identity_matched: options.identityMatched(),
         monitoring: options.monitoring(),
+        detection: options.detection?.() ?? null,
       });
       if (stopped) return;
       options.onResult?.(result, sentAt, now());

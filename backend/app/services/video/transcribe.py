@@ -46,6 +46,11 @@ TRANSCRIBE_DISABLED_DETAIL = (
     "(TRANSCRIBE_ENABLED is false), so a spoken answer cannot be transcribed."
 )
 
+#: Every Transcribe job name starts with this: the task worker's IAM grant is
+#: scoped to `transcription-job/readypick-*` (infra/environments/pilot/main.tf),
+#: and a name outside it is refused by AWS with AccessDenied on the first call.
+JOB_NAME_PREFIX = "readypick-voice-"
+
 #: The media formats Transcribe reads that a browser recorder produces.
 MEDIA_FORMATS: frozenset[str] = frozenset({"webm", "ogg", "mp4", "wav"})
 

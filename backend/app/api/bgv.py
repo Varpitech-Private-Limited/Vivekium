@@ -45,7 +45,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,7 +60,6 @@ from app.api.deps import (
 )
 from app.core.config import get_settings
 from app.models.bgv_documents import (
-    BGV_DOCUMENT_TYPES,
     CORRECTION_REASON_BOUNCE,
     DOCUMENT_TYPE_LABELS,
 )
@@ -102,7 +101,6 @@ from app.services import (
 )
 from app.services import capabilities as caps
 from app.services.audit import audit
-from app.services.rate_limit import rate_limit
 from app.workers.dispatch import dispatch_after_commit
 
 router = APIRouter()
@@ -603,15 +601,14 @@ async def _resend_after_correction(
     )
 
 
-# ── A fresher's own documents ────────────────────────────────────────────────
+# ── A candidate's legacy documents ───────────────────────────────────────────
 #
-# The brief: "Freshers: no employer BGV. Academic certificates and address
-# proof only." These routes are the candidate's, on the candidate session, and
-# there is deliberately NO recruiter route: a degree certificate is a document
-# somebody uploaded once to a platform, and the product has no consent record
-# for handing it to every customer who opens their profile. The absence is the
-# decision (see `services/bgv_documents`), and it gates nothing at all --
-# `derive_status` still answers `not_required` for a fresher.
+# UPLOAD IS RETIRED (production-fix pass, 2026-11): the profile no longer
+# collects academic certificates or address proof, so there is no POST. These
+# two routes remain only so a candidate who uploaded a file earlier can see it
+# and withdraw it; they have no screen. There is deliberately NO recruiter
+# route: the product has no consent record for sharing a degree certificate.
+# The plan for the stored files is `docs/operations/BGV_LEGACY_DOCUMENTS.md`.
 
 
 def _documents_out(documents: list) -> BGVDocumentsOut:
@@ -628,15 +625,6 @@ def _documents_out(documents: list) -> BGVDocumentsOut:
             )
             for document in documents
         ],
-        # EVERY type, always, including the ones with nothing in them. The same
-        # rule the seven compliance slots follow: a short list is one a missing
-        # address proof can hide in.
-        accepted_types=[
-            {"key": kind, "label": DOCUMENT_TYPE_LABELS[kind]}
-            for kind in BGV_DOCUMENT_TYPES
-        ],
-        upload_hint=bgv_documents.upload_limits_hint(),
-        max_per_type=get_settings().bgv_documents_max_per_type,
     )
 
 
@@ -647,37 +635,6 @@ async def my_bgv_documents(
 ) -> BGVDocumentsOut:
     """The candidate's own uploaded certificates and address proof."""
     candidate_id = await _candidate_id_for(session, user)
-    return _documents_out(
-        await bgv_documents.list_documents(session, candidate_id=candidate_id)
-    )
-
-
-@router.post(
-    "/me/documents",
-    response_model=BGVDocumentsOut,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rate_limit("bgv_document_upload", limit=30, window=3600))],
-)
-async def upload_bgv_document(
-    document_type: str = Form(...),
-    file: UploadFile = File(...),
-    user: CurrentUser = Depends(get_current_candidate),
-    session: AsyncSession = Depends(get_candidate_db),
-) -> BGVDocumentsOut:
-    """Add one document. Validated, never executed, never parsed.
-
-    The candidate id comes from the SESSION, never from the request: this
-    handler runs in the bypass scope, where the resolved candidate is the only
-    boundary there is.
-    """
-    candidate_id = await _candidate_id_for(session, user)
-    await bgv_documents.store_document(
-        session,
-        candidate_id=candidate_id,
-        document_type=document_type,
-        file=file,
-    )
-    await session.flush()
     return _documents_out(
         await bgv_documents.list_documents(session, candidate_id=candidate_id)
     )

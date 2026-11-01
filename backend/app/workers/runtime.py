@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -60,7 +61,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import get_settings
-from app.workers import status
+from app.workers import jobs, status
 from app.workers.registry import TaskSpec, resolve
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,45 @@ class TaskContext:
         except Exception:  # noqa: BLE001 -- see above
             write.close()
             logger.warning("taskrun.publish_failed run_id=%s", self.run_id, exc_info=True)
+
+    def stage(
+        self,
+        stage: str,
+        *,
+        done: int | None = None,
+        total: int | None = None,
+        waiting_external: bool = False,
+    ) -> None:
+        """Record the CURRENT STAGE in the job ledger (the durable status).
+
+        `done`/`total` only when the step is measurable; leave them out and the
+        screen shows no percentage rather than an invented one. Pass
+        `waiting_external=True` while waiting on a provider. Never raises into
+        the work, and is a no-op for an untracked run.
+        """
+        if not self.run_id:
+            return
+
+        async def _go() -> None:
+            try:
+                async with worker_session() as session:
+                    await jobs.set_stage(
+                        session, self.run_id, stage,
+                        done=done, total=total, waiting_external=waiting_external,
+                    )
+            except Exception as exc:  # noqa: BLE001 -- never fails the work
+                logger.warning(
+                    "job.stage_failed run_id=%s error=%s", self.run_id, type(exc).__name__
+                )
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _run(_go())
+            return
+        pending = loop.create_task(_go())
+        _PUBLISHES_IN_FLIGHT.add(pending)
+        pending.add_done_callback(_PUBLISHES_IN_FLIGHT.discard)
 
 
 #: Progress writes scheduled on a running loop, held until they finish: the
@@ -306,6 +346,53 @@ def _backoff(spec: TaskSpec, attempt: int) -> float:
     return min(spec.backoff_seconds * (2 ** (attempt - 1)), spec.backoff_max_seconds)
 
 
+def _ledger(fn, *args, **kwargs):
+    """Run one `workers/jobs` operation in its own session.
+
+    A ledger outage is logged and reported as None, never raised: the ledger
+    describes the work and must not be able to fail it. The cost of that choice
+    is stated where it bites: a claim that could not be made lets the task run
+    UNTRACKED, so duplicate-delivery protection is absent for that run only.
+    """
+
+    async def _go():
+        async with worker_session() as session:
+            return await fn(session, *args, **kwargs)
+
+    try:
+        return _run(_go())
+    except Exception as exc:  # noqa: BLE001 -- see docstring
+        logger.warning("job.ledger_unavailable op=%s error=%s", fn.__name__, type(exc).__name__)
+        return None
+
+
+class _Heartbeat:
+    """Proves a long run is alive, so the sweep can tell slow from lost.
+
+    A daemon thread writing `heartbeat_at` every `jobs.HEARTBEAT_INTERVAL`
+    seconds. A task that publishes no progress for ten minutes (an ffmpeg
+    transcode) would otherwise look identical to a killed worker.
+    """
+
+    def __init__(self, run_id: str) -> None:
+        self._run_id = run_id
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._loop, name=f"heartbeat-{run_id[:8]}", daemon=True
+        )
+
+    def _loop(self) -> None:
+        while not self._stop.wait(jobs.HEARTBEAT_INTERVAL):
+            _ledger(jobs.heartbeat, self._run_id)
+
+    def __enter__(self) -> "_Heartbeat":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._stop.set()
+
+
 def run_task(
     body: dict[str, Any],
     *,
@@ -326,6 +413,28 @@ def run_task(
 
     spec = resolve(name)
     cap = _max_attempts(spec)
+
+    # THE DUPLICATE-EXECUTION GUARD. Lambda async delivery is at-least-once and
+    # the sweep may re-drive a slow start, so one run id can arrive twice. Only
+    # the delivery that wins the ledger claim executes; a run the ledger has
+    # already finished (or that another worker is heartbeating) is skipped.
+    # Scheduled sweeps carry no run id and are never tracked.
+    verdict = _ledger(jobs.claim, run_id) if run_id else None
+    if verdict == jobs.DUPLICATE:
+        logger.warning("taskrun.duplicate_skipped task=%s run_id=%s", name, run_id)
+        return None
+    tracked = verdict == jobs.CLAIMED
+    heartbeat = _Heartbeat(run_id) if tracked else None
+    if heartbeat is not None:
+        heartbeat.__enter__()
+    try:
+        return _execute(spec, name, run_id, args, kwargs, cap, remaining_seconds, tracked)
+    finally:
+        if heartbeat is not None:
+            heartbeat.__exit__(None, None, None)
+
+
+def _execute(spec, name, run_id, args, kwargs, cap, remaining_seconds, tracked):
     started = time.monotonic()
     longest = 0.0
     last_error: BaseException | None = None
@@ -367,6 +476,9 @@ def run_task(
 
         elapsed = time.monotonic() - attempt_started
         payload = result if isinstance(result, dict) else {"result": result}
+        if tracked:
+            # The ledger first: it is the terminal truth, Redis only a cache.
+            _ledger(jobs.complete, run_id)
         if run_id:
             _run(status.write(run_id, status.STATE_SUCCESS, payload))
         logger.info(
@@ -376,6 +488,17 @@ def run_task(
         return result
 
     assert last_error is not None  # the loop only breaks after an exception
+    if tracked:
+        _ledger(
+            jobs.fail,
+            run_id,
+            failure_class=(
+                jobs.FAIL_PERMANENT
+                if isinstance(last_error, PermanentTaskFailure)
+                else jobs.FAIL_WORKER_ERROR
+            ),
+            detail=type(last_error).__name__,
+        )
     if run_id:
         # The exception CLASS NAME, never its message. A message can quote a
         # row, and this payload is read by a recruiter's browser.

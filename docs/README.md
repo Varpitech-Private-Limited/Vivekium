@@ -94,6 +94,7 @@ Details in [engineering/documentation-policy.md](engineering/documentation-polic
 | [DEMO_MODE.md](operations/DEMO_MODE.md) | Public demo mode: flags, confirm gate, who is refused, credits, email allowlist, cleanup. As of 2026-10-30 the pilot API task definition `readypick-pilot-api:56` sets `DEMO_MODE=true` and `DEMO_MODE_CONFIRM=public-demo`. The frontend image `readypick-pilot-frontend:46` (tag `sha-cdf9b73d358a`) was built with `NEXT_PUBLIC_DEMO_MODE=true`. tfvars were not changed and must not say `demo_mode=true` |
 | [DISASTER_RECOVERY.md](operations/DISASTER_RECOVERY.md) | Restoring the database; written, never rehearsed |
 | [BRANCH_PROTECTION.md](operations/BRANCH_PROTECTION.md) | The protection on `main` (applied) and its ten required checks |
+| [BGV_LEGACY_DOCUMENTS.md](operations/BGV_LEGACY_DOCUMENTS.md) | Candidate verification-document upload is retired; retention and erasure plan for the legacy files (purge decided, pending) |
 | [LEGACY_TABLES.md](operations/LEGACY_TABLES.md) | Every table and column dropped or kept as history, with the reason |
 | [SKIPS.md](operations/SKIPS.md) | The declared skip inventory, enforced by a test |
 | [development-storage-policy.md](development-storage-policy.md) | Permanent workspace hygiene policy |
@@ -104,6 +105,7 @@ Details in [engineering/documentation-policy.md](engineering/documentation-polic
 |---|---|
 | [VERIFICATION_RESULTS.md](verification/VERIFICATION_RESULTS.md) | Live vendor runs that succeeded, with dates |
 | [VERIFICATION_PENDING.md](verification/VERIFICATION_PENDING.md) | What remains unproven, stated plainly |
+| [PRODUCTION_DEFECTS_2026-11-01.md](verification/PRODUCTION_DEFECTS_2026-11-01.md) | The ten production defects traced to root cause, with the live task, image and quota state of 2026-11-01 (measurement) |
 | [AI_UPGRADE_BASELINE.md](verification/AI_UPGRADE_BASELINE.md) | The 2026-09-09 measurement later work is compared against; never edited to match new behaviour |
 
 ### `history/`: provenance, never instructions

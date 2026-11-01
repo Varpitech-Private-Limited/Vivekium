@@ -304,6 +304,7 @@ async def post_heartbeat(
             session, ps,
             identity_matched=body.identity_matched,
             monitoring=body.monitoring.model_dump(),
+            detection=body.detection.model_dump() if body.detection else None,
             now=_now(),
         )
     except proctoring_state.StateUnavailable as exc:

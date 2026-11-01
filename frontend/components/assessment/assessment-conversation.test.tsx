@@ -574,12 +574,15 @@ describe("spoken answers", () => {
     const first = mount(fakeBridge());
     await screen.findByLabelText("Your answer");
     expect(screen.queryByRole("button", { name: "Answer by speaking" })).toBeNull();
+    // Disabled is explained, never silent.
+    expect(screen.getByTestId("voice-not-offered").textContent).toContain("not switched on");
     first.unmount();
 
     server([turn({ voice_input_available: true, question: MCQ })]);
     mount(fakeBridge());
     await screen.findByLabelText("Drop the foreign key");
     expect(screen.queryByRole("button", { name: "Answer by speaking" })).toBeNull();
+    expect(screen.queryByTestId("voice-not-offered")).toBeNull();
   });
 
   it("submit the final transcript by its id, shown read-only, never an edited copy", async () => {

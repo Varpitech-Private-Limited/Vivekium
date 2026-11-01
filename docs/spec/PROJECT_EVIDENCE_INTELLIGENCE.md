@@ -149,7 +149,17 @@ retry/budget/breaker discipline.
 - **Recruiter**: `GET /candidates/{id}/project-evidence` behind
   `view_review_screen` (plus the HM-grant gate and a link-in-tenant check;
   cross-tenant answers 404). Rendered as the Projects tab in the review
-  screen (`frontend/components/project-evidence-panel.tsx`).
+  screen (`frontend/components/project-evidence-panel.tsx`). The response keeps
+  submission status apart from evidence: `projects` is derived evidence for
+  evidence-ready rows only; `submissions` lists EVERY submitted project with a
+  state word (queued, analysing, ready, summary_only, failed), the
+  candidate-safe `status_detail` and timestamps; `counts` totals them. The tab
+  reads "3 projects submitted; analysis queued" for pending work and shows the
+  failure note for a failed one; "No project evidence submitted" is shown only
+  for a candidate with zero submissions, and a failed load is an error, never
+  "none". While anything is queued or analysing the tab re-reads every 20
+  seconds (visible tab only). That the analysis actually runs is a worker
+  concern: see [BACKGROUND_WORK.md](BACKGROUND_WORK.md).
 - **AI context**: `services/projects/context.candidate_project_context` joins
   the per-candidate PPI question-generation payload, so the interviewer can
   probe project evidence and its validation areas. It moves no weight, no

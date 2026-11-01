@@ -223,14 +223,15 @@ def test_the_assessment_api_uses_proctoring_only_as_a_gate_and_a_report() -> Non
 
 def test_no_report_dimension_or_score_field_mentions_proctoring() -> None:
     """The report payload's rated half must have no proctoring-derived field.
-    `FunctionalReportOut.proctoring` is the ONE place it appears, and it is a
-    words-only section rather than an input to anything."""
+    `FunctionalReportOut.proctoring` is where it appears, and it is a
+    words-only section rather than an input to anything. `proctoring_state` is
+    the words-only sentence saying why that section is or is not there."""
     from app.schemas.assessments import DimensionOut, FunctionalReportOut
 
     assert "proctoring" in FunctionalReportOut.model_fields
     for name in DimensionOut.model_fields:
         assert "proctor" not in name.lower(), name
     for name, field in FunctionalReportOut.model_fields.items():
-        if name == "proctoring":
+        if name in ("proctoring", "proctoring_state"):
             continue
         assert "proctor" not in name.lower(), name

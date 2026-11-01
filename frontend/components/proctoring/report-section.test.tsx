@@ -156,3 +156,43 @@ describe("the proctoring section", () => {
     expect(text).not.toMatch(/\d+\s*%/);
   });
 });
+
+describe("the proctoring section says WHY there is no report", () => {
+  const states = [
+    ["no_session", "No proctoring session was recorded for this assessment."],
+    ["in_progress", "The monitored session has not ended yet."],
+    ["generating", "The Proctoring Report is being prepared."],
+    ["failed", "The Proctoring Report could not be produced yet."],
+  ] as const;
+
+  for (const [state, message] of states) {
+    it(`shows the server's sentence for ${state}, never a clean-looking absence`, () => {
+      render(
+        <FunctionalSkillsReportView
+          report={report({ proctoring: null, proctoring_state: { state, message } })}
+        />
+      );
+      const section = screen.getByLabelText("Proctoring Report");
+      expect(section.textContent).toContain(message);
+      expect(section.textContent).not.toContain(PROCTORING_ABSENT);
+      expect(section.textContent).not.toMatch(/no issues/i);
+    });
+  }
+
+  it("puts the partial-monitoring sentence above the report it qualifies", () => {
+    render(
+      <FunctionalSkillsReportView
+        report={report({
+          proctoring: proctoring(),
+          proctoring_state: {
+            state: "partially_unavailable",
+            message: "Monitoring was incomplete for part of this assessment.",
+          },
+        })}
+      />
+    );
+    const section = screen.getByLabelText("Proctoring Report");
+    expect(section.textContent).toContain("Monitoring was incomplete for part of this assessment.");
+    expect(section.textContent).toContain("Assessment completed.");
+  });
+});

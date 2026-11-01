@@ -5,7 +5,9 @@
 // the system's observed evidence are labelled separately, strength is a word
 // (never a number), and there is no original-file download because the
 // product does not retain originals. A candidate with no projects is a
-// normal, unpunished state and reads as one.
+// normal, unpunished state and reads as one. "No project evidence submitted"
+// is reserved for a candidate with ZERO submissions: a project that is queued
+// or being analysed is shown as exactly that, never as absent.
 
 import * as React from "react";
 import { FolderGit2 } from "lucide-react";
@@ -41,30 +43,106 @@ type ProjectEvidence = {
   processed_at: string | null;
 };
 
+type Submission = {
+  id: string;
+  name: string;
+  state: "queued" | "analysing" | "ready" | "summary_only" | "failed";
+  status_detail: string | null;
+  submitted_at: string | null;
+  updated_at: string | null;
+  processed_at: string | null;
+};
+
+export type SubmissionCounts = {
+  submitted: number;
+  queued: number;
+  analysing: number;
+  ready: number;
+  summary_only: number;
+  failed: number;
+};
+
+type Overview = {
+  projects: ProjectEvidence[];
+  submissions: Submission[];
+  counts: SubmissionCounts;
+};
+
+const POLL_MS = 20000;
+
+const STATE_LABEL: Record<Submission["state"], string> = {
+  queued: "Analysis queued",
+  analysing: "Being analysed",
+  ready: "Evidence ready",
+  summary_only: "Summary only",
+  failed: "Could not be analysed",
+};
+
+/** "3 projects submitted; analysis queued": the headline a reviewer reads first. */
+export function submissionSummary(counts: SubmissionCounts): string {
+  const noun = counts.submitted === 1 ? "project" : "projects";
+  const parts = [`${counts.submitted} ${noun} submitted`];
+  if (counts.queued > 0) parts.push("analysis queued");
+  if (counts.analysing > 0) parts.push("analysis in progress");
+  const withEvidence = counts.ready + counts.summary_only;
+  if (withEvidence > 0) parts.push(`${withEvidence} with evidence ready`);
+  if (counts.failed > 0) parts.push(`${counts.failed} could not be analysed`);
+  return parts.join("; ");
+}
+
+function formatWhen(iso: string | null): string | null {
+  return iso ? new Date(iso).toLocaleString() : null;
+}
+
 export function ProjectEvidencePanel({ candidateId }: { candidateId: string }) {
-  const [projects, setProjects] = React.useState<ProjectEvidence[] | null>(null);
+  const [data, setData] = React.useState<Overview | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [failed, setFailed] = React.useState(false);
+
+  const waiting = data
+    ? data.counts.queued > 0 || data.counts.analysing > 0
+    : false;
+
+  const load = React.useCallback(
+    (isCancelled: () => boolean) =>
+      apiGet<Overview>(`/candidates/${candidateId}/project-evidence`)
+        .then((res) => {
+          if (isCancelled()) return;
+          setData(res);
+          setFailed(false);
+        })
+        .catch(() => {
+          if (!isCancelled()) setFailed(true);
+        })
+        .finally(() => {
+          if (!isCancelled()) setLoading(false);
+        }),
+    [candidateId]
+  );
 
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setProjects(null);
-    apiGet<{ projects: ProjectEvidence[] }>(
-      `/candidates/${candidateId}/project-evidence`
-    )
-      .then((res) => {
-        if (!cancelled) setProjects(res.projects);
-      })
-      .catch(() => {
-        if (!cancelled) setProjects(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    setData(null);
+    void load(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [candidateId]);
+  }, [load]);
+
+  // While analysis is still pending, re-read the status; stop on any settled
+  // state, and skip the poll while the tab is hidden.
+  React.useEffect(() => {
+    if (!waiting) return;
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load(() => cancelled);
+    }, POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [waiting, load]);
 
   if (loading) {
     return (
@@ -73,7 +151,18 @@ export function ProjectEvidencePanel({ candidateId }: { candidateId: string }) {
       </p>
     );
   }
-  if (!projects || projects.length === 0) {
+  if (!data) {
+    return (
+      <div className="rounded-md border border-dashed p-5" role="alert">
+        <p className="font-medium">Project status could not be loaded</p>
+        <p className="mt-1 text-sm">
+          Refresh to try again. This does not mean the candidate has no projects.
+        </p>
+      </div>
+    );
+  }
+  const { projects, submissions, counts } = data;
+  if (counts.submitted === 0) {
     return (
       <div className="rounded-md border border-dashed p-5">
         <p className="font-medium">No project evidence submitted</p>
@@ -85,8 +174,38 @@ export function ProjectEvidencePanel({ candidateId }: { candidateId: string }) {
     );
   }
 
+  const evidenceIds = new Set(projects.map((project) => project.id));
+  const notes = submissions.filter(
+    (submission) => !evidenceIds.has(submission.id) || submission.state === "summary_only"
+  );
+
   return (
     <div className="space-y-4">
+      <div className="rounded-md border border-border p-4" role="status">
+        <p className="text-sm font-medium">{submissionSummary(counts)}</p>
+        {failed ? (
+          <p className="mt-1 text-xs">
+            The latest refresh failed; this status may be out of date.
+          </p>
+        ) : null}
+        {notes.length > 0 ? (
+          <ul className="mt-2 space-y-2">
+            {notes.map((submission) => (
+              <li key={submission.id} className="text-sm">
+                <span className="font-medium">{submission.name}</span>
+                {": "}
+                {STATE_LABEL[submission.state]}
+                {submission.status_detail ? `. ${submission.status_detail}` : ""}
+                {formatWhen(submission.updated_at ?? submission.submitted_at) ? (
+                  <span className="block text-xs">
+                    Last updated {formatWhen(submission.updated_at ?? submission.submitted_at)}
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       {projects.map((project) => (
         <div key={project.id} className="rounded-md border border-border p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">

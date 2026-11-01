@@ -285,6 +285,12 @@ def test_link_tolerates_a_trailing_slash_on_the_base_url() -> None:
     )
 
 
+@pytest.mark.parametrize("base", ["", "readypick.ai", "/join"])
+def test_link_refuses_a_non_absolute_base_url(base: str) -> None:
+    with pytest.raises(ValueError):
+        build_invite_link(base, "t")
+
+
 # ── Invite lifecycle ────────────────────────────────────────────────────────
 
 NOW = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)

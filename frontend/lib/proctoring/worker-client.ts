@@ -37,7 +37,10 @@ class Channel<Inbound, Outbound extends { type: string; id?: number }> {
   private readyPromise: Promise<Outbound>;
   private resolveReady!: (value: Outbound) => void;
   private rejectReady!: (error: Error) => void;
-  /** The last reply arrived, for the integrity check's "models" question. */
+  /** The last SUCCESSFUL reply arrived, for the integrity check's "models"
+   *  question. An error reply does not count: a worker that answers every
+   *  frame with an error is not a working model, and counting its replies made
+   *  the heartbeat report `models: true` while no frame was being analysed. */
   lastReplyAt: number | null = null;
   failed: Error | null = null;
 
@@ -48,7 +51,7 @@ class Channel<Inbound, Outbound extends { type: string; id?: number }> {
     });
     worker.onmessage = (event: MessageEvent<Outbound>) => {
       const message = event.data;
-      this.lastReplyAt = Date.now();
+      if (message.type !== "error") this.lastReplyAt = Date.now();
       if (message.type === "ready") {
         this.resolveReady(message);
         return;
