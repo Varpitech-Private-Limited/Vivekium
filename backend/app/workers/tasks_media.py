@@ -134,7 +134,8 @@ def reconcile_assessment_recordings():
     from app.services.assessment_conversation import voice_audio
     from app.services.video import processing
     from app.services.video import recordings as video_recordings
-    from app.workers.dispatch import dispatch
+    from app.workers import jobs as job_ledger
+    from app.workers.dispatch import dispatch_once_after_commit
 
     async def _row(session, recording_id):
         return (
@@ -221,12 +222,34 @@ def reconcile_assessment_recordings():
                 "unconfirmed=%d failed_stale=%d",
                 voice.examined, voice.deleted, voice.unconfirmed, voice.failed_stale,
             )
-        for recording_id in dict.fromkeys(to_process):
-            dispatch("pickready.process_assessment_video", args=[recording_id])
+        # DURABLE, 2026-11-01: each hand-off is a ledger row written in a
+        # transaction of its own, so a refused Fargate start (vCPU quota) is
+        # recorded as capacity_blocked and re-driven by the job sweep instead of
+        # being a lost invoke nobody reads. A recording that already has a live
+        # job is left to that job.
+        dispatched = 0
+        if to_process:
+            async with _worker_session() as session:
+                for recording_id in dict.fromkeys(to_process):
+                    if await job_ledger.has_active(
+                        session, "assessment_recording", recording_id
+                    ):
+                        continue
+                    await dispatch_once_after_commit(
+                        session,
+                        "pickready.process_assessment_video",
+                        dedupe_key=f"process_assessment_video:{recording_id}",
+                        args=[recording_id],
+                        resource_type="assessment_recording",
+                        resource_id=recording_id,
+                        idempotent=True,
+                    )
+                    dispatched += 1
+                await session.commit()
         logger.info(
             "assessment_media.reconciled raw_retried=%d raw_cleared=%d "
             "orphans_finalized=%d orphans_failed=%d stalled=%d dispatched=%d",
-            retried, cleared, finalized, failed, stalled, len(set(to_process)),
+            retried, cleared, finalized, failed, stalled, dispatched,
         )
     _run(_task())
 

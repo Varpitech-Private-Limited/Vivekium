@@ -79,7 +79,7 @@ def transcribe_voice_answer(voice_id: str):
                 )
                 return
             row.status = VOICE_TRANSCRIBING
-            row.transcribe_job_name = f"voice-{row.id.hex}-{uuid.uuid4().hex[:8]}"
+            row.transcribe_job_name = f"{transcribe.JOB_NAME_PREFIX}{row.id.hex}-{uuid.uuid4().hex[:8]}"
             await session.commit()
 
             audio_key = row.s3_key

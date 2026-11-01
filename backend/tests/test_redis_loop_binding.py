@@ -166,7 +166,7 @@ def test_a_status_write_failure_is_a_warning_naming_the_run_and_never_the_payloa
         asyncio.run(status.write("run-1", status.STATE_PROGRESS, {"secret": "PAYLOAD"}))
         result = asyncio.run(status.read("run-1"))
 
-    assert result.state == status.STATE_PENDING
+    assert result.state == status.STATE_UNKNOWN  # unreadable cache, no ledger row: never PENDING
     messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert any("taskrun.write_failed run_id=run-1" in m for m in messages), messages
     assert any("taskrun.read_failed run_id=run-1" in m for m in messages), messages

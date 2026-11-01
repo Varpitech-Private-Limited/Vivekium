@@ -1124,6 +1124,10 @@ module "scheduler" {
       task            = "pickready.probe_code_execution"
       rate_expression = "rate(5 minutes)"
     }
+    "readypick-sweep-background-jobs" = {
+      task            = "pickready.sweep_background_jobs"
+      rate_expression = "rate(5 minutes)"
+    }
   }
 
   tags = local.tags

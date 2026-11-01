@@ -326,6 +326,21 @@ SCHEDULE: tuple[ScheduledTask, ...] = (
             "rather than inferred from silence."
         ),
     ),
+    ScheduledTask(
+        rule="readypick-sweep-background-jobs",
+        task="pickready.sweep_background_jobs",
+        interval_minutes=5,
+        why=(
+            "The dispatch outbox and the stale-job settler (`workers/jobs`). "
+            "A dispatched task whose invoke was lost, whose Fargate start was "
+            "refused for vCPU quota, or whose worker stopped heartbeating "
+            "leaves a `background_jobs` row owing work. This re-drives it with "
+            "bounded backoff, records capacity refusals as capacity_blocked, "
+            "fails a job past its bound with a stated class, and purges old "
+            "terminal rows. Five minutes, because a candidate or a recruiter "
+            "is watching the status."
+        ),
+    ),
 )
 
 RULE_NAMES: tuple[str, ...] = tuple(entry.rule for entry in SCHEDULE)

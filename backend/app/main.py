@@ -33,6 +33,7 @@ from app.api import (
     employer_pages,
     intelligence,
     job_setup,
+    job_status,
     jobs,
     matching,
     outreach,
@@ -209,6 +210,7 @@ app.include_router(auth.router, prefix=f"{API_PREFIX}/auth", tags=["auth"])
 app.include_router(admin.router, prefix=f"{API_PREFIX}/admin", tags=["admin"])
 app.include_router(companies.router, prefix=f"{API_PREFIX}/companies", tags=["companies"])
 app.include_router(jobs.router, prefix=f"{API_PREFIX}/jobs", tags=["jobs"])
+app.include_router(job_status.router, prefix=f"{API_PREFIX}/job-status", tags=["job-status"])
 app.include_router(candidates.router, prefix=f"{API_PREFIX}/candidates", tags=["candidates"])
 app.include_router(matching.router, prefix=f"{API_PREFIX}/matching", tags=["matching"])
 app.include_router(verification.router, prefix=f"{API_PREFIX}/verification", tags=["verification"])
