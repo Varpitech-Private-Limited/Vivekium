@@ -47,11 +47,7 @@ ALLOWED_DOCUMENT_CONTENT_TYPES = {
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 OBJECT_PREFIX = "compliance"
 
-#: PUBLIC, and deliberately so: `services/bgv_documents` accepts the same
-#: three scan formats for a fresher's certificates and must resolve an
-#: extension to a type the identical way. A second copy of this map is a
-#: second answer to "what is a .jpeg", and the divergence would show up as
-#: one store refusing a file the other accepted.
+#: Extension to the content type this store records.
 MIME_BY_EXTENSION = {
     ".pdf": "application/pdf",
     ".jpg": "image/jpeg",

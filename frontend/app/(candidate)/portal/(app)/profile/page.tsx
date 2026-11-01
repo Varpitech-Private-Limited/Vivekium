@@ -4,8 +4,9 @@
 //
 //   * account details and, for password accounts, the password;
 //   * the MAIN resume, uploadable and re-uploadable at any time;
-//   * their employment history and its background verification, and the
-//     academic and address documents a fresher provides instead;
+//   * their employment history and its background verification (there is no
+//     document upload here; the readiness answer lives in the application
+//     form);
 //   * the profile form, answered once here instead of per application;
 //   * their consents: keeping the profile, retention choices, and the full
 //     record of what they agreed to and when;
@@ -17,7 +18,6 @@
 
 import { SettingsPage } from "@/components/settings-page";
 import { BackgroundVerificationCard } from "@/components/background-verification-card";
-import { BgvDocumentsCard } from "@/components/bgv-documents-card";
 import { ConsentHistoryCard } from "@/components/consent-history-card";
 import { ConsentRenewalCard } from "@/components/consent-renewal-card";
 import { EmploymentHistoryCard } from "@/components/employment-history-card";
@@ -39,7 +39,6 @@ export default function CandidateProfilePage() {
       <MainResumeCard />
       <EmploymentHistoryCard />
       <BackgroundVerificationCard />
-      <BgvDocumentsCard />
       <ProjectsSection />
       <CandidateProfileForm />
       <ConsentRenewalCard />

@@ -317,9 +317,12 @@ async def get_project_evidence(
     404 rather than 403 (RBAC: a cross-tenant read must not confirm
     existence).
 
-    Everything returned is DERIVED intelligence: candidate claims labelled as
-    claims, observed evidence labelled as observed, strength as a WORD. There
-    is no original file to offer, because none is retained.
+    `projects` is DERIVED intelligence for evidence-ready rows only: candidate
+    claims labelled as claims, observed evidence labelled as observed, strength
+    as a WORD. `submissions` and `counts` cover EVERY submitted project with a
+    word for its state (queued, analysing, ready, summary_only, failed), so a
+    project still being analysed is never reported as absent. There is no
+    original file to offer, because none is retained.
     """
     from app.services.projects import context as project_context
 
@@ -340,7 +343,7 @@ async def get_project_evidence(
         raise HTTPException(status_code=404, detail="Candidate not found")
     await department_access.require_candidate_in_scope(session, user, candidate_id)
     await _require_full_profile_access(session, user)
-    return {"projects": await project_context.recruiter_views(session, candidate_id)}
+    return await project_context.recruiter_overview(session, candidate_id)
 
 
 @router.get("/profiles/{profile_id}/resume-preview", response_class=HTMLResponse)

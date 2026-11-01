@@ -37,7 +37,6 @@ from sqlalchemy.pool import NullPool
 
 from app.api import auth
 from app.api.deps import ACCESS_COOKIE
-from app.core import cache
 from app.core.config import get_settings
 from app.core.db import superadmin_scope
 from app.core.security import AUDIENCE_ORG, decode_token
@@ -46,9 +45,8 @@ from app.models.enums import Role, UserStatus
 from app.models.user import User
 from app.services import auth_sessions
 from tests.candidate_session import close_candidate_session, create_candidate_session
-from tests.test_bgv_documents import (  # noqa: F401 -- `storage` is a fixture
+from tests.test_bgv_documents import (
     _png,
-    storage,
 )
 
 BGV = "/api/v1/bgv"
@@ -146,20 +144,6 @@ async def staff(factory):
                     )
 
 
-async def _reset_upload_limiter() -> None:
-    """Drop the document-upload counters, and only those.
-
-    The limiter is real and keyed on the caller's IP, which is `testclient` for
-    every run on this machine, so a counter left by earlier runs would 429 an
-    upload for a reason unrelated to this file. The same reset
-    `test_bgv_documents` performs, awaited here because this file is async.
-    """
-    client = cache._redis()  # noqa: SLF001 - the client the limiter uses
-    keys = [key async for key in client.scan_iter("ratelimit:bgv_document_upload:*")]
-    if keys:
-        await client.delete(*keys)
-
-
 def _http(cookies: dict[str, str]) -> TestClient:
     return TestClient(app, cookies=cookies)
 
@@ -221,30 +205,25 @@ async def test_appending_an_employer_reaches_the_handler(factory, candidate) -> 
     assert "not been submitted" in refused.json()["detail"]
 
 
-async def test_documents_upload_list_and_delete_with_a_real_session(
-    factory, candidate, storage  # noqa: F811 -- the imported fixture
+async def test_documents_list_and_delete_but_not_upload_with_a_real_session(
+    factory, candidate
 ) -> None:
-    await _reset_upload_limiter()
     with _http(candidate.cookies()) as http:
         listed = http.get(f"{BGV}/me/documents")
         assert listed.status_code == 200, listed.text
         assert listed.json()["documents"] == []
 
+        # Upload is retired: the method is not on the path.
         uploaded = http.post(
             f"{BGV}/me/documents",
             data={"document_type": "address_proof"},
             files={"file": ("proof.png", io.BytesIO(_png(b"real-token")), "image/png")},
         )
-        assert uploaded.status_code == 201, uploaded.text
-        [document] = uploaded.json()["documents"]
+        assert uploaded.status_code == 405, uploaded.text
 
         # Somebody else's id, or one that never existed, is NOT FOUND.
         missing = http.delete(f"{BGV}/me/documents/{uuid.uuid4()}")
         assert missing.status_code == 404
-
-        removed = http.delete(f"{BGV}/me/documents/{document['id']}")
-        assert removed.status_code == 200, removed.text
-        assert removed.json()["documents"] == []
 
 
 async def test_correcting_a_bounced_hr_address_with_a_real_session(
