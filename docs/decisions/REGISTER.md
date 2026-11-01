@@ -1,6 +1,6 @@
 # Decision register
 
-**Status:** current. **Reviewed:** 2026-10-14 (documentation audit; entries were read against code names, tests and specs, not re-run). **Updated:** 2026-10-30 (A-23, A-24).
+**Status:** current. **Reviewed:** 2026-10-14 (documentation audit; entries were read against code names, tests and specs, not re-run). **Updated:** 2026-11-02 (W-31).
 **What this is:** every owner and architecture decision that is in force today, one row each. A decision that was reversed or replaced is not here; it is in [../history/RULINGS.md](../history/RULINGS.md).
 **What this is not:** a place for detail. The "Where" column names the document or test that holds the detail.
 
@@ -75,6 +75,7 @@ The owner pre-approved every decision needed to complete the production defect m
 | P-31 | **The proctoring report says why it is absent (2026-11-01).** States: no session, in progress, generating, failed, partially unavailable, no events. With no analysis service every report is partially unavailable. The reconciler re-dispatches ended sessions with no report (overdue 30 minutes, 7 day window, 200 per run). | `services/proctoring/report.py`, `prism_view.py` |
 | D-30 | **Candidate verification-document upload is retired (2026-11-01).** `POST /bgv/me/documents` and the profile card are removed. List and withdraw stay. Nothing is purged without owner authority (Q-34). | [BGV_LEGACY_DOCUMENTS.md](../operations/BGV_LEGACY_DOCUMENTS.md) |
 | V-30 | **Voice answers (2026-11-01).** Transcribe job names use the prefix `readypick-voice-` to fit the existing IAM grant rather than widening it. The API task definition must carry `TRANSCRIBE_ENABLED=true`. The PRISM PDF is fetched as a blob so a refusal shows its reason. The video status gains a stage word beside the four-word status. | `services/video/transcribe.py`, `ppi-report-modal.tsx`, `assessment_video_access.py` |
+| W-31 | **Production defects release deployed to the pilot (2026-11-02).** Under the owner's pre-approval, PR #25 was merged and applied with the repository scripts, not a Terraform apply: migration `0138_background_jobs`, the three image Lambdas, the `readypick-assessment-trigger` zip, `readypick-pilot-api:58`, `readypick-pilot-frontend:48`, agent `:54`. The `readypick-sweep-background-jobs` schedule (`rate(5 minutes)`) was created by CLI and imported into the pilot state. A full pilot `terraform apply` stays forbidden until the live drift is reconciled (it would destroy the RDS sleep guard, recreate four interface endpoints, strip `DEMO_MODE` from the Lambdas and raise the frontend to 0.5 vCPU). The analysis service stays at desired 0, so `verify-deployment.sh` reports it as having no running tasks. | [PRODUCTION_DEFECTS_2026-11-01.md](../verification/PRODUCTION_DEFECTS_2026-11-01.md) section 7 |
 
 ---
 
