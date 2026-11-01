@@ -227,3 +227,57 @@ describe("VoiceAnswer", () => {
     expect(apiPost).toHaveBeenCalledWith(`${BASE}/v-1/acknowledge`);
   });
 });
+
+describe("VoiceAnswer recording flag for the proctoring audio detector", () => {
+  it("is on only while recording, and off once the recording is sent", async () => {
+    const { isVoiceRecordingActive } = await import("@/lib/assessment/voice-activity");
+    const fake = media();
+    mount(fake);
+    expect(isVoiceRecordingActive()).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Answer by speaking" }));
+    await screen.findByTestId("voice-recording");
+    expect(isVoiceRecordingActive()).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Stop and send" }));
+    await waitFor(() => expect(isVoiceRecordingActive()).toBe(false));
+  });
+
+  it("is cleared when the control unmounts mid-recording", async () => {
+    const { isVoiceRecordingActive } = await import("@/lib/assessment/voice-activity");
+    mount(media());
+    fireEvent.click(screen.getByRole("button", { name: "Answer by speaking" }));
+    await screen.findByTestId("voice-recording");
+    cleanup();
+    expect(isVoiceRecordingActive()).toBe(false);
+  });
+});
+
+describe("VoiceAnswer recovery", () => {
+  it("picks up a spoken answer already being transcribed instead of recording again", async () => {
+    const fake = media();
+    apiPost.mockImplementation(async (path: string) => {
+      if (path === `${BASE}/begin`) {
+        return { id: "v-1", status: "transcribing", transcript: null, max_seconds: 180 };
+      }
+      throw new Error(`unexpected POST ${path}`);
+    });
+    const { onTranscribed } = mount(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Answer by speaking" }));
+    await waitFor(() => expect(onTranscribed).toHaveBeenCalledWith("v-1", "Spoken words.", false), {
+      timeout: 4000,
+    });
+    expect(fake.recorder.start).not.toHaveBeenCalled();
+  });
+
+  it("offers another try after the microphone could not be opened", async () => {
+    const fake = media({
+      getAudioStream: vi.fn(async () => {
+        throw new Error("denied");
+      }),
+    });
+    mount(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Answer by speaking" }));
+    await screen.findByTestId("voice-unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Try speaking again" }));
+    expect(screen.getByRole("button", { name: "Answer by speaking" })).toBeTruthy();
+  });
+});

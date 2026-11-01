@@ -29,6 +29,9 @@ function access(overrides: Partial<VideoAccess> = {}): VideoAccess {
     assessment_mode_label: "Conversational",
     video_status: "Ready",
     video_status_detail: "The assessment video is ready to preview.",
+    video_stage: "ready",
+    video_stage_detail: "The assessment video is ready to preview.",
+    last_reported_at: null,
     duration_seconds: 1840,
     compressed_size_bytes: 1000,
     preview_available: true,
@@ -72,6 +75,8 @@ describe("AssessmentVideoSection", () => {
         assessment_mode_label: "Not started",
         video_status: "No recording",
         video_status_detail: "No video was recorded for this assessment.",
+        video_stage: "missing",
+        video_stage_detail: "No video was recorded for this assessment.",
         duration_seconds: null,
         preview_available: false,
       })
@@ -79,5 +84,43 @@ describe("AssessmentVideoSection", () => {
     render(<AssessmentVideoSection linkId="link-1" />);
     expect(await screen.findByText("No video was recorded for this assessment.")).toBeTruthy();
     expect(screen.queryByText("Not started")).toBeNull();
+  });
+  it("says plainly when processing has stalled and offers no retry the server would refuse", async () => {
+    apiGet.mockResolvedValue(
+      access({
+        video_status: "Processing",
+        video_stage: "stalled",
+        video_stage_detail: "Processing has not reported progress for longer than it should.",
+        last_reported_at: "2026-11-01T01:00:00Z",
+        preview_available: false,
+        duration_seconds: null,
+      })
+    );
+    render(<AssessmentVideoSection linkId="link-1" />);
+    expect(await screen.findByText(/has not reported progress/)).toBeTruthy();
+    expect(screen.getByText(/Last updated/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Retry processing/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Preview video/i })).toBeNull();
+  });
+
+  it("offers retry for a failed recording and explains a withheld download", async () => {
+    apiGet.mockResolvedValue(
+      access({
+        video_status: "Failed",
+        video_stage: "failed",
+        video_stage_detail: "Processing this recording did not complete. Use Retry processing.",
+        preview_available: false,
+        can_retry: true,
+      })
+    );
+    render(<AssessmentVideoSection linkId="link-1" />);
+    expect(await screen.findByRole("button", { name: /Retry processing/i })).toBeTruthy();
+    cleanup();
+    apiGet.mockResolvedValue(
+      access({ download_available: false, download_blocked_reason: "view-only retention" })
+    );
+    render(<AssessmentVideoSection linkId="link-1" />);
+    expect(await screen.findByText("view-only retention")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Download video/i })).toBeNull();
   });
 });

@@ -112,6 +112,8 @@ acknowledged, then the candidate types. The transcript is FINAL. Only text is
 kept: `assessment_conversation/voice_audio` HEAD-confirms the deletion of the
 recording and Transcribe's output, and a failed delete is counted and retried.
 
+`voice_input_available` is computed by the API from ITS OWN `TRANSCRIBE_ENABLED`, while the transcription runs in the task-worker Lambda, so BOTH runtimes must carry the flag. Every Transcribe job name starts with `transcribe.JOB_NAME_PREFIX` (`readypick-voice-`) because the Lambda's IAM grant is scoped to `transcription-job/readypick-*`; the Transcribe client and working bucket use `TRANSCRIBE_REGION` and `TRANSCRIBE_BUCKET` (ap-south-1 for a pilot in ap-south-2). The player shows: Answer by speaking (with the allow-microphone hint), Recording, Sending, Turning your answer into text, then the read-only transcript, or an actionable failure with a retry (`unavailable`) or the typing box (`failed`, after acknowledging). On a prose turn where the server cannot transcribe, the page says so and offers typing. A reload while a spoken answer is being transcribed picks it up instead of recording again. While recording, `lib/assessment/voice-activity.ts` holds a module-level flag and fires `vivekium:voice-recording`, which the proctoring audio loudness detector reads to leave dictation out of its window.
+
 ## 6. Scoring: one way, four stages
 
 `functional_assessment.run_assessment` (the persisted task name
@@ -247,7 +249,7 @@ serializer for the screen and the PDF. The closure gate
 check. The PDF runs the candidate's retention consent, then
 `siddhi.delivery.gate_delivery` (G4: a report routed to a person needs a
 disposition that POSTDATES it; 409 `PDF_BLOCKED_REASON`), then
-`delivery.prism_pdf`. The PDF download, the transcript and the citations are
+`delivery.prism_pdf`. The modal fetches the PDF with the session (not a bare link), saves it under the server's filename, and shows the server's own sentence for a refusal: view-only consent (403) or the G4 hold (409, `PDF_BLOCKED_REASON`). The PDF prints the serializer's `proctoring_state` message when the Proctoring Report is absent or partial. The PDF download, the transcript and the citations are
 each one audited read; opening the report is not. The citations route
 resolves the stored trail's locators at read time, scoped to the application,
 words only. The first section is headed "AI Match"; the payload key stays

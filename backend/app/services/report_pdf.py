@@ -108,6 +108,12 @@ PROCTORING_NOTE = (
     "or ranking."
 )
 PROCTORING_ABSENT = "No proctoring report exists for this assessment."
+#: Said when a report exists but the monitoring behind it had gaps and the
+#: serializer gave no sentence of its own.
+PROCTORING_PARTIAL = (
+    "Monitoring was incomplete for part of this assessment, so this report "
+    "describes less than the whole session."
+)
 
 #: THREE radar charts, not four (spec doc 4, part 3), which lists a chart for
 #: Overall Assessment, Must-have and Nice-to-have and lists only a grade and a
@@ -376,9 +382,18 @@ def _proctoring(report: Any, styles: dict[str, ParagraphStyle]) -> list[Any]:
         Spacer(1, 2 * mm),
     ]
     proctoring = _value(report, "proctoring", None)
+    # The serializer's own words for where the report stands (not started,
+    # still generating, failed, partly unavailable): printed as given, so the
+    # PDF and the screen cannot tell different stories.
+    state_message = _text(_value(_value(report, "proctoring_state", None), "message", ""))
     if not proctoring:
-        story.append(Paragraph(PROCTORING_ABSENT, styles["Body"]))
+        story.append(Paragraph(state_message or PROCTORING_ABSENT, styles["Body"]))
         return story
+    if state_message:
+        story.append(Paragraph(state_message, styles["Body"]))
+    elif _value(proctoring, "monitoring_was_incomplete", False):
+        story.append(Paragraph(PROCTORING_PARTIAL, styles["Body"]))
+    story.append(Spacer(1, 2 * mm))
     for label, key in (
         ("Candidate", "candidate"),
         ("Assessment", "assessment"),

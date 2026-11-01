@@ -64,6 +64,20 @@ The behavior is specified. As of 2026-10-30 the pilot task definition for the AP
 
 ---
 
+## Owner pre-approval of 2026-11-01
+
+The owner pre-approved every decision needed to complete the production defect mission. These are the decisions taken under it.
+
+| ID | Decision | Where |
+|---|---|---|
+| W-30 | **Durable background work (2026-11-01).** The `background_jobs` ledger is the outbox and the status of record; Redis is a cache only. A run unknown to both reports UNKNOWN, never PENDING. A Lambda 202 is acceptance, not placement. Bounds: 120s queue grace, 300s and 900s start grace, 10 minute stale heartbeat, 8 re-drives, 24 hour capacity window, 30 day purge. Recording ECS STOPPED reasons is decided, pending (needs an EventBridge rule). | `workers/dispatch.py`, `jobs.py`, `status.py`, [BACKGROUND_WORK.md](../spec/BACKGROUND_WORK.md) |
+| P-30 | **Sustained high sound level is an advisory, not Path B (2026-11-01).** `SUSTAINED_HIGH_SOUND_LEVEL` is Path C, never counts toward the three-warning termination, is excluded during a spoken answer, and is measured as uncalibrated microphone level. Escalation to Path B is not built and needs a separate owner decision. Phone thresholds (0.65, 3 frames) are unchanged pending measured staged data. | [PROCTORING.md](../spec/PROCTORING.md) |
+| P-31 | **The proctoring report says why it is absent (2026-11-01).** States: no session, in progress, generating, failed, partially unavailable, no events. With no analysis service every report is partially unavailable. The reconciler re-dispatches ended sessions with no report (overdue 30 minutes, 7 day window, 200 per run). | `services/proctoring/report.py`, `prism_view.py` |
+| D-30 | **Candidate verification-document upload is retired (2026-11-01).** `POST /bgv/me/documents` and the profile card are removed. List and withdraw stay. Nothing is purged without owner authority (Q-34). | [BGV_LEGACY_DOCUMENTS.md](../operations/BGV_LEGACY_DOCUMENTS.md) |
+| V-30 | **Voice answers (2026-11-01).** Transcribe job names use the prefix `readypick-voice-` to fit the existing IAM grant rather than widening it. The API task definition must carry `TRANSCRIBE_ENABLED=true`. The PRISM PDF is fetched as a blob so a refusal shows its reason. The video status gains a stage word beside the four-word status. | `services/video/transcribe.py`, `ppi-report-modal.tsx`, `assessment_video_access.py` |
+
+---
+
 ## Product and naming
 
 | ID | Decision | Status | Where |

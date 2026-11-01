@@ -37,7 +37,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { Download, Loader2, Lock } from "lucide-react";
 
-import { apiGet } from "@/lib/api";
+import { apiFetch, apiGet } from "@/lib/api";
 import { useToast } from "@/components/ui/toast";
 import {
   Dialog,
@@ -60,6 +60,27 @@ const FunctionalSkillsReportView = dynamic(
   { loading: () => <div className="h-64 animate-pulse rounded-lg bg-muted" /> }
 );
 
+export const VIEW_ONLY_NOTICE =
+  "The candidate chose view-only access to this assessment, so the PDF cannot be downloaded. You can read the full report here.";
+export const G4_FALLBACK_NOTICE =
+  "A person with integrity review authority must record a decision on this candidate before the PRISM Report can be downloaded.";
+
+/** The server's sentence for a refused download, else a plain one. */
+async function refusalSentence(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail) return body.detail;
+  } catch (e) {
+    if (!(e instanceof SyntaxError)) throw e;
+  }
+  return `The PDF could not be downloaded (status ${res.status}). Please try again.`;
+}
+
+function filenameFromDisposition(header: string | null): string {
+  const match = header?.match(/filename="([^"]+)"/);
+  return match ? match[1] : "prism-report.pdf";
+}
+
 export function PPIReportModal({
   open,
   onOpenChange,
@@ -80,6 +101,36 @@ export function PPIReportModal({
   // One request per open report, shared by every remark: the promise is kept
   // so a second click (or a second remark) reuses the first fetch.
   const citationsRequest = React.useRef<Promise<ReportCitations> | null>(null);
+  const [downloading, setDownloading] = React.useState(false);
+  // The PDF is fetched, not navigated to: a navigation to a refusal (consent,
+  // G4, an expired session) would save the error body as a ".pdf" file or show
+  // the browser's generic failure. Here the server's own sentence is shown.
+  const downloadPdf = async () => {
+    if (!linkId) return;
+    setDownloading(true);
+    try {
+      const res = await apiFetch(`/api/v2/assessments/reports/links/${linkId}/pdf`);
+      if (!res.ok) throw new Error(await refusalSentence(res));
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = filenameFromDisposition(res.headers.get("Content-Disposition"));
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (e) {
+      toast({
+        title: "PDF not downloaded",
+        description: e instanceof Error ? e.message : "The PDF could not be downloaded. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   React.useEffect(() => {
     citationsRequest.current = null;
   }, [open, linkId]);
@@ -147,27 +198,29 @@ export function PPIReportModal({
               ) : null}
             </div>
             {linkId && report ? (
-              !report.report_download_allowed ? (
+              report.report_download_allowed === false ? (
                 // No dead button: the candidate chose view-only retention, so
                 // the server answers 403 to the PDF route. Say why instead.
-                <p className="flex items-center gap-1.5 text-xs font-medium">
-                  <Lock className="h-3.5 w-3.5" aria-hidden />
-                  View only, at the candidate&apos;s request
+                <p
+                  className="flex max-w-xs items-start gap-1.5 text-xs font-medium"
+                  data-testid="pdf-view-only"
+                >
+                  <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                  {VIEW_ONLY_NOTICE}
                 </p>
               ) : report.pdf_available === false ? (
                 // Gate G4: the server's own sentence, verbatim.
-                <p className="max-w-xs text-xs font-medium">
-                  {report.pdf_blocked_reason}
+                <p className="max-w-xs text-xs font-medium" data-testid="pdf-g4-notice">
+                  {report.pdf_blocked_reason || G4_FALLBACK_NOTICE}
                 </p>
               ) : (
-                <Button asChild size="sm" variant="outline">
-                  <a
-                    href={`/api/v2/assessments/reports/links/${linkId}/pdf`}
-                    download
-                  >
+                <Button size="sm" variant="outline" disabled={downloading} onClick={() => void downloadPdf()}>
+                  {downloading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
                     <Download className="mr-2 h-4 w-4" aria-hidden />
-                    Download PDF
-                  </a>
+                  )}
+                  Download PDF
                 </Button>
               )
             ) : null}

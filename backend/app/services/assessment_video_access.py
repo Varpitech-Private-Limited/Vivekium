@@ -32,6 +32,7 @@ NEVER EXPOSED (spec section 13): the bucket name and the raw object keys.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -309,3 +310,75 @@ def audit_metadata(
         "conversation_id": str(recording.conversation_id),
         "recording_id": str(recording.id),
     }
+
+
+# ── The stage a reviewer reads (G, 2026-11) ───────────────────────────────────
+# The four dashboard words hide where a recording is stuck. The stage is the
+# finer, still-honest answer: what the pipeline is doing now, how long ago it
+# last said so, and what the reviewer can do. It reads rows only (no S3 call).
+
+STAGE_UPLOADED = "uploaded"
+STAGE_COMPRESSING = "compressing"
+STAGE_STORING = "storing"
+STAGE_READY = "ready"
+STAGE_MISSING = "missing"
+STAGE_FAILED = "failed"
+STAGE_STALLED = "stalled"
+STAGE_RECORDING = "recording"
+
+STAGE_DETAIL: dict[str, str] = {
+    STAGE_RECORDING: (
+        "The candidate's browser is still sending the recording, or the session "
+        "has not been finalized. Check back after the assessment is submitted."
+    ),
+    STAGE_UPLOADED: (
+        "The recording has arrived and is queued for processing. Nothing needs "
+        "doing; it normally starts within minutes."
+    ),
+    STAGE_COMPRESSING: "The recording is being converted to a playable video.",
+    STAGE_STORING: "The playable video is being saved and checked.",
+    STAGE_READY: "The assessment video is ready to preview.",
+    STAGE_FAILED: (
+        "Processing this recording did not complete. Use Retry processing to "
+        "run it again; the candidate need not do anything. If it fails again, "
+        "contact support with the application reference."
+    ),
+    STAGE_STALLED: (
+        "Processing has not reported progress for longer than it should. An "
+        "automatic recovery pass marks it so it can be retried; check back "
+        "within the hour. The candidate need not do anything."
+    ),
+}
+
+
+def video_stage(
+    recording: VideoRecording | None, *, now: datetime | None = None
+) -> tuple[str, datetime | None]:
+    """(stage, last_reported_at) for one recording.
+
+    `stalled` is a recording that is `uploaded` past `video_orphan_grace_minutes`
+    or `compressing`/`storing` past the pipeline's own stall bound
+    (`assessment_media_retention.processing_stall_after`): the same thresholds
+    the repair sweep uses, so the screen and the sweep cannot disagree.
+    """
+    from app.services import assessment_media_retention as retention  # noqa: PLC0415
+
+    if recording is None or media_deleted(recording):
+        return STAGE_MISSING, None
+    moment = now or datetime.now(timezone.utc)
+    status = recording.status
+    ended = recording.ended_at or recording.created_at
+    if status == lifecycle.READY:
+        return STAGE_READY, recording.processed_at or recording.stored_at
+    if status in lifecycle.FAILURE_STATUSES:
+        return STAGE_FAILED, None
+    if status == lifecycle.UPLOADED:
+        grace = timedelta(minutes=get_settings().video_orphan_grace_minutes)
+        return (STAGE_STALLED if ended < moment - grace else STAGE_UPLOADED), ended
+    if status in (lifecycle.COMPRESSING, lifecycle.STORING):
+        started = recording.processing_started_at or ended
+        stalled = started < moment - retention.processing_stall_after()
+        return (
+            STAGE_STALLED if stalled else status
+        ), started
+    return STAGE_RECORDING, recording.created_at

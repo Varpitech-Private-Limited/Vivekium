@@ -731,3 +731,167 @@ async def test_an_hr_manager_reaches_every_job_in_their_tenant(monkeypatch) -> N
     finally:
         await _cleanup(factory, fx)
         await engine.dispose()
+
+
+# ── G (2026-11): the stage a reviewer reads, deleted media, revoked consent ──
+
+
+def _row(status: str, *, started_ago_minutes: int = 0, **fields):
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    moment = datetime.now(timezone.utc) - timedelta(minutes=started_ago_minutes)
+    base = dict(
+        status=status, ended_at=moment, created_at=moment,
+        processing_started_at=moment, processed_at=None, stored_at=None,
+        media_deleted_at=None,
+    )
+    base.update(fields)
+    return SimpleNamespace(**base)
+
+
+def test_every_lifecycle_status_has_a_stage_and_a_sentence() -> None:
+    for status in lifecycle.STATUSES:
+        stage, _ = video_access.video_stage(_row(status))
+        assert stage in (
+            video_access.STAGE_RECORDING, video_access.STAGE_UPLOADED,
+            video_access.STAGE_COMPRESSING, video_access.STAGE_STORING,
+            video_access.STAGE_READY, video_access.STAGE_FAILED,
+        ), status
+        assert video_access.STAGE_DETAIL[stage]
+
+
+def test_stages_name_what_the_pipeline_is_doing() -> None:
+    assert video_access.video_stage(None)[0] == video_access.STAGE_MISSING
+    deleted = _row(lifecycle.READY, media_deleted_at=datetime.now(timezone.utc))
+    assert video_access.video_stage(deleted)[0] == video_access.STAGE_MISSING
+    assert video_access.video_stage(_row(lifecycle.UPLOADED))[0] == video_access.STAGE_UPLOADED
+    assert video_access.video_stage(_row(lifecycle.COMPRESSING))[0] == video_access.STAGE_COMPRESSING
+    assert video_access.video_stage(_row(lifecycle.STORING))[0] == video_access.STAGE_STORING
+    assert video_access.video_stage(_row(lifecycle.READY))[0] == video_access.STAGE_READY
+    for failure in lifecycle.FAILURE_STATUSES:
+        assert video_access.video_stage(_row(failure))[0] == video_access.STAGE_FAILED
+
+
+def test_a_run_past_its_bounds_reads_stalled_not_in_progress() -> None:
+    from app.services import assessment_media_retention as retention
+
+    long_ago = int(retention.processing_stall_after().total_seconds() // 60) + 5
+    assert video_access.video_stage(
+        _row(lifecycle.COMPRESSING, started_ago_minutes=long_ago)
+    )[0] == video_access.STAGE_STALLED
+    assert video_access.video_stage(
+        _row(lifecycle.UPLOADED, started_ago_minutes=24 * 60)
+    )[0] == video_access.STAGE_STALLED
+    assert video_access.video_stage(
+        _row(lifecycle.UPLOADED, started_ago_minutes=1)
+    )[0] == video_access.STAGE_UPLOADED
+
+
+async def _expect_409(coro, expected_detail: str) -> None:
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as excinfo:
+        await coro
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail == expected_detail
+
+
+@pytest.mark.asyncio
+async def test_deleted_media_is_refused_for_preview_and_download_and_never_signed(
+    monkeypatch,
+) -> None:
+    from app.api import videos as mod
+    from app.core.db import superadmin_scope
+    from app.services import object_storage
+
+    engine, factory = await _factory_or_skip()
+    fx = _Fx()
+    calls: list = []
+    monkeypatch.setattr(object_storage, "presigned_get_url", _fake_presigner(calls))
+    try:
+        await _seed(factory, fx, recording_status=lifecycle.READY, download_consent=True)
+        async with factory() as s:
+            async with s.begin():
+                async with superadmin_scope(s):
+                    await s.execute(
+                        text("UPDATE video_recordings SET media_deleted_at = now() WHERE id = :r"),
+                        {"r": str(fx.recording_id)},
+                    )
+        out = await _metadata(fx, factory)
+        assert out.video_stage == video_access.STAGE_MISSING
+        assert out.video_stage_detail == video_access.VIDEO_DELETED_DETAIL
+        assert not out.preview_available and not out.download_available
+        async with factory() as s:
+            async with superadmin_scope(s):
+                await _expect_409(
+                    mod.request_video_preview(fx.link_id, user=_user(fx), session=s),
+                    video_access.VIDEO_DELETED_DETAIL,
+                )
+                await _expect_409(
+                    mod.request_video_download(fx.link_id, user=_user(fx), session=s),
+                    video_access.VIDEO_DELETED_DETAIL,
+                )
+        assert calls == [], "a URL was signed for deleted media"
+    finally:
+        await _cleanup(factory, fx)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_consent_revoked_after_a_grant_closes_download_on_the_next_request(
+    monkeypatch,
+) -> None:
+    """Preview needs no download consent; download re-reads the candidate on
+    EVERY request, so a revocation takes effect at once and each allowed
+    request writes its own audit row."""
+    from fastapi import HTTPException
+
+    from app.api import videos as mod
+    from app.core.db import superadmin_scope
+    from app.services import object_storage
+
+    engine, factory = await _factory_or_skip()
+    fx = _Fx()
+    monkeypatch.setattr(object_storage, "presigned_get_url", _fake_presigner([]))
+    try:
+        await _seed(factory, fx, recording_status=lifecycle.READY, download_consent=True)
+        async with factory() as s:
+            async with superadmin_scope(s):
+                await mod.request_video_download(fx.link_id, user=_user(fx), session=s)
+                await mod.request_video_preview(fx.link_id, user=_user(fx), session=s)
+                await s.execute(
+                    text("UPDATE candidates SET retain_video_consent = false WHERE id = :c"),
+                    {"c": str(fx.cand_id)},
+                )
+                with pytest.raises(HTTPException) as excinfo:
+                    await mod.request_video_download(fx.link_id, user=_user(fx), session=s)
+                assert excinfo.value.status_code == 403
+                still_previewable = await mod.request_video_preview(
+                    fx.link_id, user=_user(fx), session=s
+                )
+                assert still_previewable.disposition == "inline"
+                actions = (
+                    await s.execute(
+                        text("SELECT action FROM audit_log WHERE target_id = :r"),
+                        {"r": str(fx.recording_id)},
+                    )
+                ).scalars().all()
+                assert sorted(actions) == sorted([
+                    video_access.VIDEO_DOWNLOAD_REQUESTED,
+                    video_access.VIDEO_PREVIEW_REQUESTED,
+                    video_access.VIDEO_PREVIEW_REQUESTED,
+                ])
+    finally:
+        await _cleanup(factory, fx)
+        await engine.dispose()
+
+
+def test_a_presigned_url_expires_by_setting_and_the_response_says_when() -> None:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    assert settings.video_preview_url_ttl_seconds > 0
+    assert settings.video_download_url_ttl_seconds > 0
+    source = (BACKEND / "app" / "api" / "videos.py").read_text(encoding="utf-8")
+    assert "expires_in_seconds=ttl" in source

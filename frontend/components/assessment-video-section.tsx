@@ -45,6 +45,10 @@ export const LEGACY_FORMAT_NOTE =
   "This assessment was taken as a video interview, an earlier format that is no " +
   "longer offered. The recording is shown as it was made.";
 
+/** Stages in which the recording is still on its way to being playable. */
+const IN_PROGRESS_STAGES = ["recording", "uploaded", "compressing", "storing"];
+const VIDEO_POLL_MS = 15_000;
+
 /** 1840 seconds reads "30:40"; anything over an hour reads "1:02:05". */
 export function formatDuration(totalSeconds: number): string {
   const whole = Math.max(0, Math.round(totalSeconds));
@@ -93,6 +97,20 @@ export function AssessmentVideoSection({ linkId }: { linkId: string }) {
     setPlayerUrl(null);
     return load();
   }, [load]);
+
+  // While the pipeline is still working the answer changes by itself: look
+  // again, quietly, only while the tab is visible, and stop at any other stage.
+  const inProgress = access !== null && IN_PROGRESS_STAGES.includes(access.video_stage);
+  React.useEffect(() => {
+    if (!inProgress) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      apiGet<VideoAccess>(`/videos/links/${linkId}`)
+        .then(setAccess)
+        .catch(() => undefined);
+    }, VIDEO_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [inProgress, linkId]);
 
   const openPreview = async () => {
     setWorking("preview");
@@ -207,7 +225,12 @@ export function AssessmentVideoSection({ linkId }: { linkId: string }) {
               </dd>
             </div>
           </dl>
-          <p className="text-sm">{access.video_status_detail}</p>
+          <p className="text-sm">{access.video_stage_detail || access.video_status_detail}</p>
+          {access.last_reported_at ? (
+            <p className="text-xs">
+              Last updated {new Date(access.last_reported_at).toLocaleString()}
+            </p>
+          ) : null}
 
           {access.preview_available ? (
             <div className="flex flex-wrap items-center gap-2">

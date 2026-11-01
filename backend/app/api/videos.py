@@ -127,6 +127,7 @@ async def video_metadata(
         media_deleted=deleted,
     )
     preview_available = video_access.is_servable(recording)
+    stage, reported_at = video_access.video_stage(recording)
     download_consented = (
         await _download_consented(session, link) if preview_available else False
     )
@@ -141,6 +142,17 @@ async def video_metadata(
             if deleted
             else video_access.VIDEO_STATUS_DETAIL[status_word]
         ),
+        video_stage=stage,
+        # Missing keeps the status route's own sentence: deleted and never
+        # recorded are different facts.
+        video_stage_detail=(
+            video_access.VIDEO_DELETED_DETAIL
+            if deleted
+            else video_access.VIDEO_STATUS_DETAIL[status_word]
+            if stage == video_access.STAGE_MISSING
+            else video_access.STAGE_DETAIL[stage]
+        ),
+        last_reported_at=reported_at,
         duration_seconds=(
             recording.duration_seconds if preview_available else None
         ),

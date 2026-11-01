@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { apiGet, toastApi } = vi.hoisted(() => ({
+const { apiGet, apiFetch, toastApi } = vi.hoisted(() => ({
   apiGet: vi.fn(),
+  apiFetch: vi.fn(),
   // Stable across renders: the real useToast returns a stable `toast`, and the
   // modal lists it in its fetch effect's dependency array. A mock minting a
   // fresh function every render re-runs that effect after each render, which
@@ -13,7 +14,7 @@ const { apiGet, toastApi } = vi.hoisted(() => ({
   toastApi: { toast: vi.fn() },
 }));
 
-vi.mock("@/lib/api", () => ({ apiGet }));
+vi.mock("@/lib/api", () => ({ apiGet, apiFetch }));
 vi.mock("@/components/ui/toast", () => ({
   useToast: () => toastApi,
 }));
@@ -54,11 +55,12 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
 }));
 
-import { PPIReportModal } from "./ppi-report-modal";
+import { G4_FALLBACK_NOTICE, PPIReportModal, VIEW_ONLY_NOTICE } from "./ppi-report-modal";
 
 afterEach(() => {
   cleanup();
   apiGet.mockReset();
+  apiFetch.mockReset();
 });
 
 describe("PPIReportModal PDF export", () => {
@@ -91,12 +93,59 @@ describe("PPIReportModal PDF export", () => {
       />
     );
 
-    expect(screen.queryByRole("link", { name: /Download PDF/i })).toBeNull();
-    const link = await screen.findByRole("link", { name: /Download PDF/i });
-    expect(link.getAttribute("href")).toBe(
-      "/api/v2/assessments/reports/links/link-1/pdf"
+    expect(screen.queryByRole("button", { name: /Download PDF/i })).toBeNull();
+    const button = await screen.findByRole("button", { name: /Download PDF/i });
+    // The PDF is fetched with the session, then saved as the server named it.
+    const saved = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const createObjectURL = vi.fn(() => "blob:pdf");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+    apiFetch.mockResolvedValue(
+      new Response("%PDF-1.4", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="prism-report-Fixture-Candidate.pdf"',
+        },
+      })
     );
-    expect(link.hasAttribute("download")).toBe(true);
+    fireEvent.click(button);
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+    expect(apiFetch).toHaveBeenCalledWith("/api/v2/assessments/reports/links/link-1/pdf");
+    expect(toastApi.toast).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's own sentence when the PDF route refuses, and saves nothing", async () => {
+    apiGet.mockResolvedValue({
+      id: "report-1",
+      job_candidate_link_id: "link-1",
+      ai_score: [],
+      must_have: [],
+      nice_to_have: [],
+      behavioural: [],
+      validation: {},
+      radar_charts: [],
+      overall_grade: "Matching",
+      overall_summary: "Evidence summary",
+      synthesized_at: "2026-09-26T00:00:00Z",
+      report_download_allowed: true,
+    });
+    const createObjectURL = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+    apiFetch.mockResolvedValue(
+      new Response(JSON.stringify({ detail: "The candidate consented to view-only access for this assessment." }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    render(
+      <PPIReportModal open onOpenChange={() => undefined} linkId="link-1" candidateName="Fixture Candidate" />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Download PDF/i }));
+    await waitFor(() => expect(toastApi.toast).toHaveBeenCalledTimes(1));
+    expect(toastApi.toast.mock.calls[0][0].description).toBe(
+      "The candidate consented to view-only access for this assessment."
+    );
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 
   it("shows view-only instead of a dead Download button without retention consent", async () => {
@@ -129,10 +178,8 @@ describe("PPIReportModal PDF export", () => {
       />
     );
 
-    expect(
-      await screen.findByText(/View only, at the candidate's request/i)
-    ).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Download PDF/i })).toBeNull();
+    expect(await screen.findByText(VIEW_ONLY_NOTICE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Download PDF/i })).toBeNull();
   });
 
   it("heads the document with the PRISM name and its expansion", async () => {
@@ -241,7 +288,30 @@ describe("PPIReportModal PDF export", () => {
     );
 
     expect(await screen.findByText(reason)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Download PDF/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Download PDF/i })).toBeNull();
+  });
+
+  it("still explains the G4 hold when the server sent no sentence", async () => {
+    apiGet.mockResolvedValue({
+      id: "report-1",
+      job_candidate_link_id: "link-1",
+      ai_score: [],
+      must_have: [],
+      nice_to_have: [],
+      behavioural: [],
+      validation: {},
+      radar_charts: [],
+      overall_grade: "Matching",
+      overall_summary: "Evidence summary",
+      synthesized_at: "2026-09-26T00:00:00Z",
+      report_download_allowed: true,
+      pdf_available: false,
+      pdf_blocked_reason: null,
+    });
+    render(
+      <PPIReportModal open onOpenChange={() => undefined} linkId="link-1" candidateName="Fixture Candidate" />
+    );
+    expect(await screen.findByText(G4_FALLBACK_NOTICE)).toBeTruthy();
   });
 
   it("fetches the citations only when a remark is opened, and once per report", async () => {
