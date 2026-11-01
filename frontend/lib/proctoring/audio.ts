@@ -31,6 +31,17 @@
  * its own record of the spoken answers open around the time the chunk
  * arrived; this module sends the audio and nothing about when it was heard.
  *
+ * SUSTAINED HIGH SOUND LEVEL (mission item B, 2026-11-01). The same analyser
+ * also feeds `SoundLevelDetector` (`sound-level.ts`), which raises an
+ * ADVISORY, never a warning, when the level stays well above the room's own
+ * noise floor. It runs whether or not an analysis service exists, because it
+ * is local arithmetic over the browser's own stream. It does not judge a
+ * reading while the candidate is dictating a spoken answer: the voice-answer
+ * component sets `setVoiceRecordingActive` (`lib/assessment/voice-activity.ts`)
+ * for the whole recording phase, and this monitor reads
+ * `isVoiceRecordingActive`. One shared flag, owned by the voice side, because
+ * the recorder and this monitor are built by different parts of the page.
+ *
  * A LOST MICROPHONE PAUSES the assessment (see `device-watch.ts`). This
  * monitor reports the loss through `onLost`, retries a failed stream on its
  * own every `DEVICE_RETRY_MS`, waits for the candidate on a revoked
@@ -38,9 +49,19 @@
  * recording can start a new segment on it.
  */
 import type { AudioChunkOut, TerminationOut, WarningOut } from "./api";
+import { isVoiceRecordingActive } from "@/lib/assessment/voice-activity";
+
 import { isSessionEnded } from "./api";
 import { isPermissionDenied } from "./camera";
 import { DEVICE_RETRY_MS, type LossKind } from "./device-watch";
+import type { EventDraft } from "./events";
+import {
+  rmsToDbfs,
+  SOUND_LEVEL_ADVISORY,
+  SoundLevelDetector,
+  spectrumCharacter,
+  type SoundLevelConfig,
+} from "./sound-level";
 
 /** See the header. Quietest-to-loudest RMS ratio within one chunk. */
 export const SPEECH_ENERGY_RATIO = 4;
@@ -58,12 +79,19 @@ export interface AudioOptions {
   /** `SessionOut.audio_analysis_available`. When false nothing is recorded. */
   uploadEnabled: boolean;
   upload: (chunk: Blob) => Promise<AudioChunkOut>;
+  /** The sound-level rules (a subset of the session config). */
+  sound: SoundLevelConfig;
+  /** Where a sound-level advisory event goes (the session's event queue). */
+  emit: (draft: EventDraft) => void;
+  /** The candidate-facing reminder, shown without interrupting the answer. */
+  onAdvisory: (message: string) => void;
   onLost: (kind: LossKind) => void;
   onRecovered: (stream: MediaStream) => void;
   onWarning: (warning: WarningOut, warningsUsed: number) => void;
   onTermination: (termination: TerminationOut) => void;
   onSessionEnded: (message: string) => void;
   navigator?: Navigator;
+  now?: () => number;
 }
 
 export async function openMicrophone(navigator: Navigator = window.navigator): Promise<MediaStream> {
@@ -94,9 +122,13 @@ export class AudioMonitor {
   private lostKind: LossKind | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private reacquiring: Promise<boolean> | null = null;
+  private readonly sound: SoundLevelDetector;
+  private readonly now: () => number;
 
   constructor(private readonly options: AudioOptions) {
     this.nav = options.navigator ?? window.navigator;
+    this.now = options.now ?? Date.now;
+    this.sound = new SoundLevelDetector(options.sound, () => this.character());
   }
 
   async start(stream?: MediaStream): Promise<void> {
@@ -137,12 +169,20 @@ export class AudioMonitor {
   private attach(stream: MediaStream): void {
     const track = stream.getAudioTracks()[0];
     if (track) track.onended = () => void this.onTrackEnded();
-    if (!this.options.uploadEnabled) return;
+    // The analyser always runs: the sound-level advisory needs it even where
+    // there is no analysis service to upload to.
     this.context = new AudioContext();
     this.analyser = this.context.createAnalyser();
     this.context.createMediaStreamSource(stream).connect(this.analyser);
     this.vadTimer = setInterval(() => this.sampleEnergy(), VAD_POLL_MS);
-    this.startChunk(stream);
+    if (this.options.uploadEnabled) this.startChunk(stream);
+  }
+
+  private character(): "voice_like" | "broadband" | null {
+    if (!this.analyser || !this.context) return null;
+    const bins = new Float32Array(this.analyser.frequencyBinCount);
+    this.analyser.getFloatFrequencyData(bins);
+    return spectrumCharacter(bins, this.context.sampleRate, this.analyser.fftSize);
   }
 
   private sampleEnergy(): void {
@@ -154,6 +194,18 @@ export class AudioMonitor {
     const rms = Math.sqrt(total / buffer.length);
     this.quietest = Math.min(this.quietest, rms);
     this.loudest = Math.max(this.loudest, rms);
+    // A muted track stays "live" and reads silence; a lost one has no analyser.
+    // Neither is a loud room, and neither is judged.
+    const track = this.stream?.getAudioTracks()[0];
+    const draft = this.sound.observe({
+      at: this.now(),
+      dbfs: rmsToDbfs(rms),
+      excluded: isVoiceRecordingActive() || !track || track.muted === true || track.readyState !== "live",
+    });
+    if (draft) {
+      this.options.emit(draft);
+      this.options.onAdvisory(SOUND_LEVEL_ADVISORY);
+    }
   }
 
   private speechHeard(): boolean {

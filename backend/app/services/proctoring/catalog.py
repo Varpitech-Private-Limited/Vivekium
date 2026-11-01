@@ -77,6 +77,7 @@ __all__ = [
     "LOGGED_ONLY",
     "PAUSING",
     "DEVICE_RECOVERED",
+    "SOUND_LEVEL",
     "DEVICE_REASONS",
     "INTERRUPTED_FORM",
     "GROUP_SCREEN",
@@ -203,6 +204,15 @@ _ENTRIES: tuple[EventSpec, ...] = (
     EventSpec(
         "SPEECH_DURING_NON_AUDIO_QUESTION", PATH_C, GROUP_AUDIO, client_emittable=False
     ),
+    # A sustained, uncalibrated microphone level above the room's own floor.
+    # An ADVISORY, never a warning: it is not Path B on purpose, so it can
+    # never reach the three-warning counter whatever the policy (owner mission
+    # 2026-11-01, item B). The browser measures it; `ingestion._loud` refuses
+    # a report that is too short, inside the cooldown or during a spoken answer.
+    EventSpec(
+        "SUSTAINED_HIGH_SOUND_LEVEL", PATH_C, GROUP_AUDIO, client_emittable=True,
+        cooldown="loud_cooldown_seconds", cooldown_key="SUSTAINED_HIGH_SOUND_LEVEL",
+    ),
 )
 
 CATALOG: dict[str, EventSpec] = {entry.event_type: entry for entry in _ENTRIES}
@@ -216,6 +226,7 @@ LOGGED_ONLY: frozenset[str] = frozenset(e.event_type for e in _ENTRIES if e.path
 PAUSING: frozenset[str] = frozenset(e.event_type for e in _ENTRIES if e.pauses)
 
 DEVICE_RECOVERED = "DEVICE_RECOVERED"
+SOUND_LEVEL = "SUSTAINED_HIGH_SOUND_LEVEL"
 #: The two ways the pause path ends a session.
 DEVICE_REASONS: frozenset[str] = frozenset(
     {"DEVICE_PAUSE_LIMIT_EXCEEDED", "DEVICE_RECOVERY_TIMED_OUT"}

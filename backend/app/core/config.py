@@ -225,18 +225,6 @@ class Settings(BaseSettings):
     # candidate who did nothing wrong, which is the worse failure.
     verification_link_ttl_days: int = 3
 
-    # -- A fresher's own verification documents (migration 0114) -------------
-    #
-    # The brief gives a fresher academic certificates and address proof in
-    # place of employer BGV. Every ceiling on that upload is DATA here rather
-    # than a literal in the pipeline, the rule `project_*` already follows:
-    # a candidate-supplied file is hostile input, and a bound somebody can
-    # only find by reading the parser is a bound nobody can change safely.
-    bgv_document_max_bytes: int = 10 * 1024 * 1024
-    #: Per candidate PER TYPE. A degree, a diploma and a consolidated marksheet
-    #: are three legitimate academic certificates; thirty is an abuse surface.
-    bgv_documents_max_per_type: int = 6
-
     # -- Background task dispatch --------------------------------------------
     #
     # Three real deployments, never a fallback chain (see workers/dispatch):
@@ -569,6 +557,25 @@ class Settings(BaseSettings):
     #: From this many occurrences the report lifts the speaking finding into
     #: its summary.
     proctoring_speech_highlight_threshold: int = 3
+    # Sustained high sound level (Path C, advisory; never a warning and never
+    # counted toward the three-warning limit). Browser-side microphone level in
+    # dBFS, NOT a calibrated sound pressure level: a level counts as high when
+    # it is above `threshold_dbfs` AND `margin_db` above the room's own noise
+    # floor (measured during the first `calibration_seconds`), for
+    # `sustained_seconds` without a break; it ends once the level falls
+    # `hysteresis_db` below the line. The same advisory is not repeated for
+    # `cooldown_seconds`. The server refuses a report shorter than the sustained
+    # window, one inside the cooldown, and one overlapping a spoken answer.
+    proctoring_loud_threshold_dbfs: float = -20.0
+    proctoring_loud_margin_db: float = 25.0
+    proctoring_loud_hysteresis_db: float = 6.0
+    proctoring_loud_sustained_seconds: int = 6
+    proctoring_loud_cooldown_seconds: int = 120
+    proctoring_loud_calibration_seconds: int = 10
+    # A session that ended without a Proctoring Report for this long is shown
+    # as "report could not be produced yet" and is re-dispatched by the hourly
+    # reconciler.
+    proctoring_report_overdue_minutes: int = 30
     #: The analysis service (speaker diarization, AI-text detection). Empty
     #: means audio analysis is UNAVAILABLE, which the report states plainly;
     #: it is never silently treated as "no second voice".

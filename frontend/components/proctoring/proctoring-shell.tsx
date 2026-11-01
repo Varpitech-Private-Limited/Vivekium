@@ -38,6 +38,7 @@ import Link from "next/link";
 import { MonitoringIndicator } from "@/components/proctoring/monitoring-indicator";
 import { PauseOverlay } from "@/components/proctoring/pause-overlay";
 import { ProctoringProvider } from "@/components/proctoring/proctoring-context";
+import { AdvisoryNotice } from "@/components/proctoring/advisory-notice";
 import { ConsentScreen } from "@/components/proctoring/consent-screen";
 import { SystemCheckScreen } from "@/components/proctoring/system-check-screen";
 import { WarningModal } from "@/components/proctoring/warning-modal";
@@ -103,6 +104,7 @@ export function ProctoringShell({
   const [endedMessage, setEndedMessage] = React.useState<string | null>(null);
   const [pause, setPause] = React.useState<PauseView>(NO_PAUSE);
   const [retrying, setRetrying] = React.useState(false);
+  const [advisory, setAdvisory] = React.useState<string | null>(null);
 
   const config = loaded?.config ?? null;
   const runtime = React.useRef<SessionRuntime | null>(null);
@@ -232,6 +234,7 @@ export function ProctoringShell({
           onTermination: (termination: TerminationOut) => finish(termination.message),
           onSessionEnded: (message) => finish(message),
           onPauseChange: setPause,
+          onAdvisory: setAdvisory,
         },
         mediaRecording
       );
@@ -279,6 +282,8 @@ export function ProctoringShell({
   const graceExpired = React.useCallback(() => {
     runtime.current?.checkNow();
   }, []);
+
+  const dismissAdvisory = React.useCallback(() => setAdvisory(null), []);
 
   const pauseOpen = pauseScreenOpen(pause);
 
@@ -374,6 +379,7 @@ export function ProctoringShell({
         paused={pauseOpen}
       />
       <WarningModal message={warning?.message ?? null} onAcknowledge={acknowledge} />
+      <AdvisoryNotice message={advisory} onDismiss={dismissAdvisory} />
       <PauseOverlay
         view={pause}
         open={pauseOpen}

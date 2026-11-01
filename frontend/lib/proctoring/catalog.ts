@@ -48,6 +48,9 @@ export const CLIENT_EVENTS = {
   BLOCKED_ACTION_ATTEMPTED: "C",
   SESSION_QUALITY_DEGRADED: "C",
   INTEGRITY_CHECK_WARNING: "C",
+  // An advisory, deliberately not Path B: a sustained microphone level is
+  // context, never a warning (`sound-level.ts`).
+  SUSTAINED_HIGH_SOUND_LEVEL: "C",
   // A stream that came back inside `device_glitch_seconds`: logged, and it
   // costs no pause.
   CAMERA_STREAM_INTERRUPTED: "C",

@@ -58,6 +58,8 @@ __all__ = [
     "BLOCKED_ACTIONS_NOTE",
     "AUDIO_UNAVAILABLE",
     "MONITORING_REDUCED_RATE",
+    "CAMERA_ANALYSIS_FAILING",
+    "MONITORING_COMPONENT_STOPPED",
     "FORBIDDEN_WORDS",
 ]
 
@@ -118,6 +120,15 @@ AUDIO_UNAVAILABLE = (
 MONITORING_REDUCED_RATE = (
     "The candidate's device could not keep up with the usual monitoring rate, "
     "so camera monitoring ran at a reduced rate for part of the assessment."
+)
+CAMERA_ANALYSIS_FAILING = (
+    "Camera analysis was failing on the candidate's device for part of the "
+    "assessment, so a phone or another person on camera may not have been "
+    "detected during that time."
+)
+MONITORING_COMPONENT_STOPPED = (
+    "Part of the monitoring stopped responding for a time and recovered, so "
+    "some activity may not have been checked during that period."
 )
 
 _ONES = (
@@ -268,6 +279,13 @@ _FINDINGS: dict[str, str] = {
         "noted and never ends an assessment; it can be the candidate thinking "
         "aloud or reading a question to themselves."
     ),
+    "SUSTAINED_HIGH_SOUND_LEVEL": (
+        "The microphone picked up a sustained high sound level {times}, for "
+        "about {duration} in total. This is a rough reading of the microphone "
+        "and cannot tell shouting from a loud room, a fan, music or the "
+        "microphone's own volume settings, so it is noted for context only. "
+        "It never earns a warning and never ends an assessment."
+    ),
     "INTEGRITY_CHECK_FAILED": (
         "The monitoring components stopped responding and did not recover, so "
         "the assessment could not continue."
@@ -365,6 +383,7 @@ _ACTIVITY: dict[str, str] = {
     "SPEECH_DURING_NON_AUDIO_QUESTION": (
         "Spoke during a question that does not take a spoken answer"
     ),
+    "SUSTAINED_HIGH_SOUND_LEVEL": "The microphone picked up a sustained high sound level",
     "INTEGRITY_CHECK_FAILED": "Monitoring stopped responding and did not recover",
     "INTEGRITY_CHECK_WARNING": "Monitoring stopped responding and recovered",
     "MONITORING_INTERRUPTED": "Monitoring was interrupted",
@@ -383,6 +402,11 @@ _ACTIVITY: dict[str, str] = {
 AUDIO_UNAVAILABLE_NOTE = "audio_analysis_unavailable"
 AUDIO_FAILED_NOTE = "audio_analysis_failed"
 AUDIO_ACTIVITY = "Audio monitoring was not available"
+#: The browser's camera analysis failed on frame after frame (`camera.ts`). A
+#: phone or a second person could have gone unnoticed for that stretch, so the
+#: report says so rather than reading as an all-clear.
+CAMERA_ANALYSIS_FAILING_NOTE = "camera_analysis_failing"
+CAMERA_ANALYSIS_FAILING_ACTIVITY = "Camera analysis was failing"
 
 
 def activity_description(event_type: str, metadata: dict | None = None) -> str:
@@ -391,6 +415,8 @@ def activity_description(event_type: str, metadata: dict | None = None) -> str:
     note = (metadata or {}).get("note")
     if event_type == "SESSION_QUALITY_DEGRADED" and note in (AUDIO_UNAVAILABLE_NOTE, AUDIO_FAILED_NOTE):
         return AUDIO_ACTIVITY
+    if event_type == "SESSION_QUALITY_DEGRADED" and note == CAMERA_ANALYSIS_FAILING_NOTE:
+        return CAMERA_ANALYSIS_FAILING_ACTIVITY
     if event_type == "BLOCKED_ACTION_ATTEMPTED":
         return _BLOCKED_ACTIVITY[blocked_kind(metadata)]
     return _ACTIVITY[event_type]
@@ -806,6 +832,12 @@ def candidate_rules(config: ProctoringConfig) -> list[str]:
     rules.extend(
         [
             (
+                "If the sound level around you stays high for a while, a short "
+                "reminder appears on screen and the report notes it. It is a "
+                "note only and never earns a warning. Your spoken answers are "
+                "not counted."
+            ),
+            (
                 "Copying, cutting, pasting and dragging text are blocked, and "
                 "every attempt is noted in the report."
             ),
@@ -820,3 +852,34 @@ def candidate_rules(config: ProctoringConfig) -> list[str]:
         ]
     )
     return rules
+
+
+# ── The state of the Proctoring Report in the PRISM Report ───────────────────
+
+#: Keyed by `report.STATE_*`. A finished, complete report has no entry: the
+#: report speaks for itself. Every other state says what is true, and none says
+#: "no issues", because absence of a report is not absence of events.
+REPORT_STATE_MESSAGES: dict[str, str] = {
+    "no_session": (
+        "No proctoring session was recorded for this assessment, so there is no "
+        "Proctoring Report. Nothing can be said either way about how it was taken."
+    ),
+    "in_progress": (
+        "The monitored session has not ended yet. The Proctoring Report is "
+        "written once it does."
+    ),
+    "generating": (
+        "The Proctoring Report is being prepared and will appear here shortly."
+    ),
+    "failed": (
+        "The Proctoring Report could not be produced yet. It is retried "
+        "automatically, and nothing should be read into its absence."
+    ),
+    "partially_unavailable": (
+        "Monitoring was incomplete for part of this assessment, so the "
+        "Proctoring Report below describes less than the whole session."
+    ),
+    "no_events": (
+        "Monitoring ran for the whole assessment and nothing was recorded."
+    ),
+}

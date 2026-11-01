@@ -18,6 +18,17 @@
  * SESSION_QUALITY_DEGRADED, because a slow laptop is context for the report
  * and never a reason to stop a candidate (spec 3.6).
  *
+ * A FRAME THAT FAILS IS COUNTED, NOT HIDDEN (mission item A, 2026-11-01). A
+ * frame the worker could not process used to vanish in a bare catch, so a
+ * worker that errored on every frame looked, from outside, like a camera that
+ * saw nothing. Now each failure is counted; a run of them as long as one
+ * heartbeat interval's worth of frames is reported ONCE per run as
+ * SESSION_QUALITY_DEGRADED with the note `camera_analysis_failing`, which the
+ * Proctoring Report states as a period a phone could have gone unnoticed. The
+ * counts, the mean inference time and the best phone confidence seen (even
+ * below the event threshold) go to the server with each heartbeat
+ * (`takeDetectionStats`). Numbers only: no frame, no label list.
+ *
  * A DEAD STREAM (Phase 3, 2026-09-24: a loss PAUSES, it no longer ends). The
  * track ending is either the candidate revoking the permission or the device
  * failing. The permission API says which, where the browser offers it; where
@@ -30,10 +41,12 @@
  * put a browser prompt in front of somebody every second. Which event each of
  * those becomes, and when, is `device-watch.ts`'s business, not this file's.
  */
+import type { DetectionStats } from "./api";
 import type { ProctoringClientConfig } from "./config";
 import { seconds } from "./config";
 import { DetectionRules, type FrameDetections } from "./detections";
 import { DEVICE_RETRY_MS, type LossKind } from "./device-watch";
+import { OBJECT_EVENT_FOR_LABEL } from "./catalog";
 import type { EventDraft } from "./events";
 import type { InferenceClient } from "./worker-client";
 
@@ -98,6 +111,12 @@ export class CameraMonitor {
   private readonly windowFrames: number;
   private frames = 0;
   private startedAt: number;
+  private statProcessed = 0;
+  private statFailed = 0;
+  private statSince: number;
+  private statInferenceMs = 0;
+  private statPhoneBest: number | null = null;
+  private failureRun = 0;
   /** Why the camera is down, or null while it is live. */
   private lostKind: LossKind | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -116,6 +135,7 @@ export class CameraMonitor {
     this.windowFrames = options.config.sampling_fps_normal * options.config.heartbeat_interval_seconds;
     this.startedAt = this.now();
     this.lastIdentityCheck = this.startedAt;
+    this.statSince = this.startedAt;
   }
 
   async start(stream?: MediaStream): Promise<void> {
@@ -138,6 +158,24 @@ export class CameraMonitor {
       width: settings?.width ?? null,
       height: settings?.height ?? null,
     };
+  }
+
+  /** What the last interval looked like, then start a new one. */
+  takeDetectionStats(): DetectionStats {
+    const elapsed = (this.now() - this.statSince) / 1000;
+    const stats: DetectionStats = {
+      frames_processed: this.statProcessed,
+      frames_failed: this.statFailed,
+      measured_fps: elapsed > 0 && this.statProcessed > 0 ? this.statProcessed / elapsed : null,
+      inference_ms_mean: this.statProcessed > 0 ? this.statInferenceMs / this.statProcessed : null,
+      phone_best_score: this.statPhoneBest,
+    };
+    this.statProcessed = 0;
+    this.statFailed = 0;
+    this.statInferenceMs = 0;
+    this.statPhoneBest = null;
+    this.statSince = this.now();
+    return stats;
   }
 
   /** The stream being sampled, or null while the camera is down. */
@@ -340,6 +378,13 @@ export class CameraMonitor {
       ]);
       const detections = await this.options.inference.detect(frame, at);
       this.frames += 1;
+      this.failureRun = 0;
+      this.statProcessed += 1;
+      this.statInferenceMs += detections.inferenceMs;
+      for (const detection of detections.objects) {
+        if (OBJECT_EVENT_FOR_LABEL[detection.label] !== "DEVICE_DETECTED_PHONE") continue;
+        this.statPhoneBest = Math.max(this.statPhoneBest ?? 0, detection.score);
+      }
       this.recordInference(detections.inferenceMs);
       const observed: FrameDetections = {
         at,
@@ -361,8 +406,16 @@ export class CameraMonitor {
         for (const event of this.options.rules.observeIdentity(distance)) this.options.onEvent(event);
       }
     } catch {
-      // A frame the worker could not process. The integrity check watches
-      // for the worker going quiet; one bad frame is not that.
+      // One bad frame is not an outage, but it is not nothing either: it is
+      // counted, and a run of them is reported (see the header).
+      this.statFailed += 1;
+      this.failureRun += 1;
+      if (this.failureRun === this.windowFrames) {
+        this.options.onEvent({
+          event_type: "SESSION_QUALITY_DEGRADED",
+          metadata: { note: "camera_analysis_failing", failed_frames: this.failureRun },
+        });
+      }
     } finally {
       this.inFlight = false;
       this.schedule();
