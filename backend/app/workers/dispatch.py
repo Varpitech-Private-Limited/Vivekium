@@ -399,7 +399,7 @@ async def redrive(job: Any, attempt: int):
         try:
             message = str(json.loads(response["Payload"].read()).get("errorMessage", ""))
         except (ValueError, AttributeError):
-            pass
+            logger.info("dispatch.redrive_error_payload_unreadable task=%s", spec.name)
         capacity = "[capacity]" in message
         logger.warning(
             "dispatch.redrive_refused task=%s run_id=%s class=%s",

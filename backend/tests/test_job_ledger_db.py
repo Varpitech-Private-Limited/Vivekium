@@ -30,6 +30,12 @@ async def factory():
     except Exception:  # noqa: BLE001 -- any connect failure means "no DB here"
         await engine.dispose()
         pytest.skip("no database reachable")
+    # Every dispatch in an earlier test leaves an outbox row. The sweep leases the
+    # oldest rows first, so those would crowd out this module's rows in a full run.
+    async with async_sessionmaker(engine)() as session:
+        async with session.begin():
+            async with superadmin_scope(session):
+                await session.execute(text("DELETE FROM background_jobs"))
     yield async_sessionmaker(engine, expire_on_commit=False)
     async with async_sessionmaker(engine)() as session:
         async with session.begin():

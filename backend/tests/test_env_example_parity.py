@@ -127,7 +127,6 @@ INTERNAL_ONLY: dict[str, frozenset[str]] = {
         "PROJECT_MAX_FILES", "PROJECT_MAX_FILE_BYTES",
         "PROJECT_MAX_PROJECTS_PER_CANDIDATE", "PROJECT_MAX_TEXT_CHARS_PER_FILE",
         "PROJECT_MAX_TOTAL_BYTES", "PROJECT_REPO_MAX_FILES", "PROJECT_REPO_MAX_FILE_BYTES",
-        "BGV_DOCUMENT_MAX_BYTES", "BGV_DOCUMENTS_MAX_PER_TYPE",
         # VIDEO_MAX_UPLOAD_BYTES and VIDEO_MAX_DURATION_SECONDS are documented
         # with the rest of the segmented recording's limits in `.env.example`.
     }),
